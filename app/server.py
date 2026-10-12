@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import traceback
 import urllib.parse
 import webbrowser
@@ -23,6 +24,7 @@ import platform_util  # noqa: E402
 import prompts  # noqa: E402
 import sheets  # noqa: E402
 import sync_text  # noqa: E402
+import trash  # noqa: E402
 import update  # noqa: E402
 import version  # noqa: E402
 import watcher  # noqa: E402
@@ -65,19 +67,44 @@ def open_in_finder(path, reveal=False):
 
 # ───────────────────────── 대시보드 ─────────────────────────
 
+def term_range(year, sem):
+    """학기 날짜 범위 [시작, 끝). 1학기 3~8월, 2학기 9월~이듬해 2월."""
+    if sem == 1:
+        return "%04d-03-01" % year, "%04d-09-01" % year
+    return "%04d-09-01" % year, "%04d-03-01" % (year + 1)
+
+
+def current_term(today=None):
+    d = today or datetime.date.today()
+    if 3 <= d.month <= 8:
+        return d.year, 1
+    return (d.year, 2) if d.month >= 9 else (d.year - 1, 2)
+
+
 @route("GET", "/api/dashboard")
 def dashboard(h, q, body):
+    year, sem = _int(q.get("year")), _int(q.get("semester"))
+    if year and sem in (1, 2):
+        cf = "SELECT id FROM classes WHERE year=%d AND semester=%d" % (year, sem)
+        t0, t1 = term_range(year, sem)
+        rf = "(r.class_id IN (%s) OR (r.class_id IS NULL AND r.recorded_at >= '%s' AND r.recorded_at < '%s'))" % (cf, t0, t1)
+    else:
+        cf, t0, t1 = "SELECT id FROM classes", None, None
+        rf = "1=1"
+    sf = "SELECT id FROM students WHERE class_id IN (%s)" % cf
     conn = db.connect()
     try:
+        one = lambda sql: conn.execute(sql).fetchone()[0]  # noqa: E731
         t = {
-            "classes": conn.execute("SELECT COUNT(*) FROM classes").fetchone()[0],
-            "students": conn.execute("SELECT COUNT(*) FROM students").fetchone()[0],
-            "recordings": conn.execute("SELECT COUNT(*) FROM recordings").fetchone()[0],
-            "notes": conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0],
-            "with_notes": conn.execute("SELECT COUNT(DISTINCT student_id) FROM notes").fetchone()[0],
-            "drafted": conn.execute("SELECT COUNT(DISTINCT student_id) FROM drafts").fetchone()[0],
-            "finalized": conn.execute("SELECT COUNT(DISTINCT student_id) FROM drafts WHERE status='확정'").fetchone()[0],
-            "pending_review": conn.execute("SELECT COUNT(*) FROM recordings WHERE status IN ('확인필요','오류','보관됨')").fetchone()[0],
+            "classes": one("SELECT COUNT(*) FROM classes WHERE id IN (%s)" % cf),
+            "students": one("SELECT COUNT(*) FROM students WHERE class_id IN (%s)" % cf),
+            "recordings": one("SELECT COUNT(*) FROM recordings r WHERE %s" % rf),
+            "notes": one("SELECT COUNT(*) FROM notes WHERE student_id IN (%s)" % sf),
+            "with_notes": one("SELECT COUNT(DISTINCT student_id) FROM notes WHERE student_id IN (%s)" % sf),
+            "drafted": one("SELECT COUNT(DISTINCT student_id) FROM drafts WHERE student_id IN (%s)" % sf),
+            "finalized": one("SELECT COUNT(DISTINCT student_id) FROM drafts WHERE status='확정' AND student_id IN (%s)" % sf),
+            "pending_review": one("SELECT COUNT(*) FROM recordings r WHERE r.status IN ('확인필요','오류','보관됨') AND %s" % rf),
+            "all_classes": one("SELECT COUNT(*) FROM classes"),
         }
         classes = db.rows(conn, """
             SELECT c.*,
@@ -87,14 +114,17 @@ def dashboard(h, q, body):
               (SELECT COUNT(DISTINCT d.student_id) FROM drafts d JOIN students s ON s.id=d.student_id WHERE s.class_id=c.id) AS drafted,
               (SELECT COUNT(DISTINCT d.student_id) FROM drafts d JOIN students s ON s.id=d.student_id WHERE s.class_id=c.id AND d.status='확정') AS finalized,
               (SELECT COUNT(*) FROM recordings r WHERE r.class_id=c.id) AS recordings
-            FROM classes c ORDER BY c.year DESC, c.semester DESC, c.grade, c.class_no""")
+            FROM classes c WHERE c.id IN (%s) ORDER BY c.year DESC, c.semester DESC, c.grade, c.class_no""" % cf)
         for c in classes:
             c["label"] = db.class_label(c)
-        start = (datetime.date.today() - datetime.timedelta(weeks=11)).isoformat()
-        weekly_raw = db.rows(conn, """SELECT date, kind, COUNT(*) AS n FROM notes WHERE date >= ? GROUP BY date, kind""",
-                             (start,))
-        weeks = []
         today = datetime.date.today()
+        if t1:
+            end = datetime.date.fromisoformat(t1) - datetime.timedelta(days=1)
+            today = min(today, end)  # 지난 학기는 그 학기 마지막 주까지
+        start = (today - datetime.timedelta(weeks=11)).isoformat()
+        weekly_raw = db.rows(conn, "SELECT date, kind, COUNT(*) AS n FROM notes WHERE date >= ? AND student_id IN (%s) "
+                                   "GROUP BY date, kind" % sf, (start,))
+        weeks = []
         monday = today - datetime.timedelta(days=today.weekday())
         for i in range(11, -1, -1):
             ws = monday - datetime.timedelta(weeks=i)
@@ -109,24 +139,114 @@ def dashboard(h, q, body):
                 key = "상담" if r["kind"] == "상담" else "수업"
                 weeks[idx][key] += r["n"]
         needy = db.rows(conn, """
-            SELECT s.id, s.number, s.name, c.grade, c.class_no, c.subject,
+            SELECT s.id, s.number, s.name, c.grade, c.class_no, c.subject, c.kind,
                    (SELECT COUNT(*) FROM notes n WHERE n.student_id=s.id) AS notes,
                    (SELECT MAX(date) FROM notes n WHERE n.student_id=s.id) AS last_date
-            FROM students s JOIN classes c ON c.id=s.class_id
-            ORDER BY notes ASC, last_date ASC, c.grade, c.class_no, s.number LIMIT 12""")
+            FROM students s JOIN classes c ON c.id=s.class_id WHERE c.id IN (%s)
+            ORDER BY notes ASC, last_date ASC, c.grade, c.class_no, s.number LIMIT 12""" % cf)
         for n in needy:
             n["label"] = db.class_label(n)
         categories = db.rows(conn, "SELECT COALESCE(NULLIF(category,''),'기타') AS category, COUNT(*) AS n "
-                                   "FROM notes GROUP BY 1 ORDER BY n DESC")
-        recent = db.rows(conn, """SELECT r.id, r.title, r.kind, r.status, r.recorded_at, c.grade, c.class_no, c.subject,
+                                   "FROM notes WHERE student_id IN (%s) GROUP BY 1 ORDER BY n DESC" % sf)
+        recent = db.rows(conn, """SELECT r.id, r.title, r.kind, r.status, r.recorded_at, c.grade, c.class_no, c.subject, c.kind AS ckind,
                    (SELECT COUNT(*) FROM notes n WHERE n.recording_id=r.id) AS notes
-                   FROM recordings r LEFT JOIN classes c ON c.id=r.class_id ORDER BY r.recorded_at DESC, r.id DESC LIMIT 8""")
+                   FROM recordings r LEFT JOIN classes c ON c.id=r.class_id WHERE %s
+                   ORDER BY r.recorded_at DESC, r.id DESC LIMIT 8""" % rf)
         for r in recent:
-            r["label"] = db.class_label(r) if r.get("grade") else "학급 미지정"
+            r["label"] = db.class_label(dict(r, kind=r.get("ckind"))) if (r.get("grade") or r.get("subject")) else "학급 미지정"
         return {"totals": t, "classes": classes, "weeks": weeks, "needy": needy,
                 "categories": categories, "recent": recent}
     finally:
         conn.close()
+
+
+@route("GET", "/api/term")
+def term_now(h, q, b):
+    y, s = current_term()
+    return {"year": y, "semester": s}
+
+
+# ───────────────────────── 검색 ─────────────────────────
+
+def _snippet(text, term, before=40, after=70):
+    text = " ".join((text or "").split())
+    i = text.lower().find(term.lower())
+    if i < 0:
+        return text[:before + after] + ("…" if len(text) > before + after else "")
+    a, z = max(0, i - before), min(len(text), i + len(term) + after)
+    return ("…" if a else "") + text[a:z] + ("…" if z < len(text) else "")
+
+
+@route("GET", "/api/search")
+def search(h, q, b):
+    term = (q.get("q") or "").strip()[:80]
+    out = {"q": term, "classes": [], "students": [], "notes": [], "recordings": []}
+    if not term:
+        return out
+    like = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    esc = " ESCAPE '\\'"
+    conn = db.connect()
+    try:
+        cls = db.rows(conn, "SELECT c.*, (SELECT COUNT(*) FROM students s WHERE s.class_id=c.id) AS students FROM classes c "
+                            "WHERE c.subject LIKE ?" + esc + " OR (CAST(c.grade AS TEXT) || '-' || CAST(c.class_no AS TEXT)) LIKE ?" + esc +
+                            " ORDER BY c.year DESC, c.semester DESC, c.grade, c.class_no LIMIT 10", (like, like))
+        for c in cls:
+            c["label"] = db.class_label(c)
+        out["classes"] = cls
+        st = db.rows(conn, """SELECT s.id, s.number, s.name, s.aliases, c.id AS class_id, c.year, c.semester, c.grade, c.class_no,
+                   c.subject, c.kind, (SELECT COUNT(*) FROM notes n WHERE n.student_id=s.id) AS notes
+                   FROM students s JOIN classes c ON c.id=s.class_id
+                   WHERE s.name LIKE ?""" + esc + " OR s.aliases LIKE ?" + esc + """
+                   ORDER BY c.year DESC, c.semester DESC, c.grade, c.class_no, s.number LIMIT 20""", (like, like))
+        for s in st:
+            s["label"] = db.class_label(s)
+        out["students"] = st
+        notes = db.rows(conn, """SELECT n.id, n.student_id, n.date, n.kind AS nkind, n.category, n.content, n.evidence,
+                   s.name, s.number, c.year, c.semester, c.grade, c.class_no, c.subject, c.kind
+                   FROM notes n JOIN students s ON s.id=n.student_id JOIN classes c ON c.id=s.class_id
+                   WHERE n.content LIKE ?""" + esc + " OR n.evidence LIKE ?" + esc + """
+                   ORDER BY n.date DESC, n.id DESC LIMIT 30""", (like, like))
+        for n in notes:
+            n["label"] = db.class_label(n)
+            n["snippet"] = _snippet(n["content"] if term.lower() in (n["content"] or "").lower() else n["evidence"], term)
+            n.pop("evidence", None)
+            n.pop("content", None)
+        out["notes"] = notes
+        recs = db.rows(conn, """SELECT r.id, r.title, r.kind AS rkind, r.recorded_at, r.status, r.transcript,
+                   c.year, c.semester, c.grade, c.class_no, c.subject, c.kind
+                   FROM recordings r LEFT JOIN classes c ON c.id=r.class_id
+                   WHERE r.title LIKE ?""" + esc + " OR r.transcript LIKE ?" + esc + """
+                   ORDER BY r.recorded_at DESC, r.id DESC LIMIT 15""", (like, like))
+        for r in recs:
+            r["label"] = db.class_label(r) if (r.get("grade") or r.get("subject")) else "학급 미지정"
+            r["snippet"] = "" if term.lower() in (r["title"] or "").lower() else _snippet(r["transcript"], term)
+            r.pop("transcript", None)
+        out["recordings"] = recs
+        return out
+    finally:
+        conn.close()
+
+
+# ───────────────────────── 휴지통 ─────────────────────────
+
+@route("GET", "/api/trash")
+def trash_list(h, q, b):
+    return trash.listing()
+
+
+@route("POST", "/api/trash/restore")
+def trash_restore(h, q, b):
+    return trash.restore(int(b["id"]))
+
+
+@route("POST", "/api/trash/delete")
+def trash_delete(h, q, b):
+    return {"ok": True, "deleted": trash.purge(trash_id=int(b["id"]))}
+
+
+@route("POST", "/api/trash/empty")
+def trash_empty(h, q, b):
+    return {"ok": True, "deleted": trash.purge(everything=True)}
 
 
 # ───────────────────────── 학급 / 학생 ─────────────────────────
@@ -134,7 +254,8 @@ def dashboard(h, q, body):
 @route("GET", "/api/classes")
 def classes_list(h, q, body):
     conn = db.connect()
-    cs = db.rows(conn, """SELECT c.*, (SELECT COUNT(*) FROM students s WHERE s.class_id=c.id) AS students
+    cs = db.rows(conn, """SELECT c.*, (SELECT COUNT(*) FROM students s WHERE s.class_id=c.id) AS students,
+                          (SELECT COUNT(*) FROM notes n JOIN students s ON s.id=n.student_id WHERE s.class_id=c.id) AS notes
                           FROM classes c ORDER BY c.year DESC, c.semester DESC, c.grade, c.class_no, c.subject""")
     conn.close()
     for c in cs:
@@ -164,13 +285,60 @@ def classes_save(h, q, b):
     return {"ok": True, "id": cid}
 
 
+@route("POST", "/api/classes/copy")
+def classes_copy(h, q, b):
+    """새 학기 준비: 학급 명단(번호·이름·별칭)을 다른 학기의 새 학급으로 복사. 관찰기록·초안은 복사하지 않음."""
+    year, sem = _int(b.get("year")), _int(b.get("semester"))
+    if not year or sem not in (1, 2):
+        raise ApiError("옮길 학기를 고르세요.")
+    items = b.get("items") or []
+    if not items:
+        raise ApiError("복사할 학급을 고르세요.")
+    copy_memo = bool(b.get("memo"))
+    conn = db.connect()
+    made, added, ids = 0, 0, []
+    try:
+        for it in items:
+            src = db.row(conn, "SELECT * FROM classes WHERE id=?", (int(it["id"]),))
+            if not src:
+                continue
+            kind = it.get("kind") if it.get("kind") in db.CLASS_KINDS else (src.get("kind") or "교과")
+            grade = _int(it.get("grade"), src.get("grade")) if "grade" in it else src.get("grade")
+            class_no = _int(it.get("class_no"), src.get("class_no")) if "class_no" in it else src.get("class_no")
+            subject = (it.get("subject") if "subject" in it else src.get("subject") or "") or ""
+            subject = subject.strip()
+            ex = db.row(conn, "SELECT id FROM classes WHERE year=? AND semester=? AND IFNULL(grade,0)=IFNULL(?,0) "
+                              "AND IFNULL(class_no,0)=IFNULL(?,0) AND IFNULL(subject,'')=? AND IFNULL(kind,'교과')=?",
+                        (year, sem, grade, class_no, subject, kind))
+            if ex:
+                cid = ex["id"]
+            else:
+                cid = conn.execute("INSERT INTO classes(year, semester, grade, class_no, subject, kind) VALUES (?,?,?,?,?,?)",
+                                   (year, sem, grade, class_no, subject, kind)).lastrowid
+                made += 1
+            ids.append(cid)
+            if cid == src["id"]:
+                continue
+            have = {r["name"] for r in db.rows(conn, "SELECT name FROM students WHERE class_id=?", (cid,))}
+            for st in db.rows(conn, "SELECT * FROM students WHERE class_id=? ORDER BY number, id", (src["id"],)):
+                if st["name"] in have:
+                    continue
+                conn.execute("INSERT INTO students(class_id, number, name, aliases, memo) VALUES (?,?,?,?,?)",
+                             (cid, st["number"], st["name"], st.get("aliases") or "", (st.get("memo") or "") if copy_memo else ""))
+                added += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "classes": made, "students": added, "ids": ids}
+
+
 @route("POST", "/api/classes/delete")
 def classes_delete(h, q, b):
     conn = db.connect()
-    conn.execute("DELETE FROM classes WHERE id=?", (int(b["id"]),))
+    tid = trash.move(conn, "class", b["id"])
     conn.commit()
     conn.close()
-    return {"ok": True}
+    return {"ok": True, "trash_id": tid}
 
 
 @route("GET", r"/api/classes/(\d+)")
@@ -273,10 +441,10 @@ def students_save(h, q, b):
 @route("POST", "/api/students/delete")
 def students_delete(h, q, b):
     conn = db.connect()
-    conn.execute("DELETE FROM students WHERE id=?", (int(b["id"]),))
+    tid = trash.move(conn, "student", b["id"])
     conn.commit()
     conn.close()
-    return {"ok": True}
+    return {"ok": True, "trash_id": tid}
 
 
 @route("GET", r"/api/students/(\d+)")
@@ -335,10 +503,10 @@ def notes_save(h, q, b):
 @route("POST", "/api/notes/delete")
 def notes_delete(h, q, b):
     conn = db.connect()
-    conn.execute("DELETE FROM notes WHERE id=?", (int(b["id"]),))
+    tid = trash.move(conn, "note", b["id"])
     conn.commit()
     conn.close()
-    return {"ok": True}
+    return {"ok": True, "trash_id": tid}
 
 
 # ───────────────────────── 녹음 ─────────────────────────
@@ -461,16 +629,12 @@ def recordings_done(h, q, b):
 @route("POST", "/api/recordings/delete")
 def recordings_delete(h, q, b):
     conn = db.connect()
-    r = db.row(conn, "SELECT * FROM recordings WHERE id=?", (int(b["id"]),))
-    if r:
-        if b.get("delete_notes"):
-            conn.execute("DELETE FROM notes WHERE recording_id=?", (r["id"],))
-        conn.execute("DELETE FROM recordings WHERE id=?", (r["id"],))
-        conn.commit()
-        if b.get("delete_audio") and r["audio_path"] and os.path.exists(r["audio_path"]):
-            os.remove(r["audio_path"])
+    # 녹음 파일은 바로 지우지 않고, 휴지통에서 영구 삭제(또는 30일 뒤)될 때 함께 지운다
+    tid = trash.move(conn, "recording", b["id"], delete_notes=bool(b.get("delete_notes")),
+                     delete_audio=bool(b.get("delete_audio")))
+    conn.commit()
     conn.close()
-    return {"ok": True}
+    return {"ok": True, "trash_id": tid}
 
 
 @route("POST", "/api/recordings/rule_segment")
@@ -628,10 +792,10 @@ def drafts_save(h, q, b):
 @route("POST", "/api/drafts/delete")
 def drafts_delete(h, q, b):
     conn = db.connect()
-    conn.execute("DELETE FROM drafts WHERE id=?", (int(b["id"]),))
+    tid = trash.move(conn, "draft", b["id"])
     conn.commit()
     conn.close()
-    return {"ok": True}
+    return {"ok": True, "trash_id": tid}
 
 
 # ───────────────────────── 설정 ─────────────────────────
@@ -960,14 +1124,23 @@ def sync_text_set(h, q, b):
 
 @route("GET", "/api/version")
 def version_info(h, q, b):
-    return {"version": version.VERSION, "repo": version.UPDATE_REPO, "code_dir": db.APP_DIR,
-            "shell": update.shell_version(), "shell_outdated": update.shell_outdated()}
+    out = {"version": version.VERSION, "repo": version.UPDATE_REPO, "code_dir": db.APP_DIR,
+           "shell": update.shell_version(), "shell_outdated": update.shell_outdated(),
+           "auto": update.auto_status()}
+    if q.get("notice") == "1":
+        out["just_updated"] = update.just_updated(consume=True)
+    return out
 
 
 @route("POST", "/api/update/install_app")
 def update_install_app(h, q, b):
     db.backup_to(os.path.join(db.BACKUP_DIR, "seteuk-before-app-update-%s.db" % datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
-    return update.install_app()
+    update.mark_updating(version.VERSION, "app")
+    try:
+        return update.install_app()
+    except Exception:
+        update.mark_updating("", "")
+        raise
 
 
 @route("GET", "/api/update/check")
@@ -985,7 +1158,13 @@ def update_apply(h, q, b):
     if busy:
         raise ApiError("AI 작업이 진행 중입니다. 끝난 뒤 업데이트하세요.")
     db.backup_to(os.path.join(db.BACKUP_DIR, "seteuk-before-update-%s.db" % datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
-    return update.apply()
+    info = update.check()
+    update.mark_updating(version.VERSION, info.get("latest") or "", info.get("notes") or "")
+    try:
+        return update.apply()
+    except Exception:
+        update.mark_updating("", "")
+        raise
 
 
 @route("POST", "/api/shutdown")
@@ -1039,6 +1218,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_static(path)
         if method == "POST" and self.headers.get("X-Seteuk") != "1":
             return self._send(403, {"error": "missing header"})
+        if method == "POST":
+            update.LAST_POST[0] = time.time()  # 자동 업데이트는 조작이 없을 때만
         for m, rx, fn in ROUTES:
             if m != method:
                 continue
@@ -1166,6 +1347,8 @@ def main():
     watcher.start()
     sheets.start()
     sync_text.start()
+    if update.start_auto():
+        print("자동 업데이트 확인 켜짐")
     url = "http://%s:%d" % (HOST, PORT)
     print("쓰담 %s 실행 중: %s  (코드: %s, 데이터: %s)" % (version.VERSION, url, db.APP_DIR, db.DATA_DIR))
     if os.environ.get("SETEUK_NO_BROWSER") != "1":

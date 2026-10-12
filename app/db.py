@@ -61,6 +61,11 @@ DEFAULT_SETTINGS = {
     "downloads_import": "1",
     "downloads_since": "",
     "teacher_name": "",
+    # 자동 업데이트 (쉬는 틈에 새 버전으로) + 업데이트 뒤 한 번 보여 줄 안내
+    "auto_update": "1",
+    "updated_from": "",
+    "updated_to": "",
+    "updated_notes": "",
 }
 
 # 학교생활기록부 기재 영역. 학급 유형에 따라 쓸 수 있는 영역이 정해진다.
@@ -156,6 +161,11 @@ CREATE TABLE IF NOT EXISTS imported (
     created_at TEXT DEFAULT (datetime('now','localtime')),
     PRIMARY KEY (source, ext_id)
 );
+CREATE TABLE IF NOT EXISTS trash (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT, title TEXT DEFAULT '', detail TEXT DEFAULT '', payload TEXT,
+    deleted_at TEXT DEFAULT (datetime('now','localtime'))
+);
 CREATE INDEX IF NOT EXISTS idx_students_class ON students(class_id);
 CREATE INDEX IF NOT EXISTS idx_notes_student ON notes(student_id);
 CREATE INDEX IF NOT EXISTS idx_drafts_student ON drafts(student_id);
@@ -207,6 +217,11 @@ def init():
     conn.commit()
     conn.close()
     daily_backup()
+    try:
+        import trash  # 30일 지난 휴지통 항목 비우기
+        trash.purge()
+    except Exception as e:  # noqa
+        print("휴지통 정리 실패:", e)
 
 
 def _migrate_columns(conn):

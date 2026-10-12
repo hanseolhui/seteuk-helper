@@ -246,3 +246,183 @@ def fetch_whisper_binary(dest_dir):
         return out
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ───────────────────────── 자동 업데이트 ─────────────────────────
+# 2시간마다(그리고 잠자기에서 깬 뒤) 새 버전을 확인하고, 선생님이 쉬는 틈
+# (20분 동안 아무 조작 없음 · AI 작업 없음 · 모델 내려받기 없음)에만 바꿔 끼운다.
+
+LAST_POST = [time.time()]          # server.Handler 가 POST 요청마다 갱신
+_auto = {"pending": None, "fails": [], "last_check": 0, "state": "대기", "error": ""}
+
+
+def _env_num(name, default):
+    try:
+        return float(os.environ.get(name) or default)
+    except ValueError:
+        return default
+
+
+IDLE_SEC = _env_num("SSEUDAM_UPDATE_IDLE_SEC", 20 * 60)
+FIRST_SEC = _env_num("SSEUDAM_UPDATE_FIRST_SEC", 120)
+EVERY_SEC = _env_num("SSEUDAM_UPDATE_EVERY_SEC", 2 * 3600)
+TICK_SEC = _env_num("SSEUDAM_UPDATE_TICK_SEC", 60)
+
+
+def _dry_run():
+    # 테스트 데이터(SETEUK_DATA)로 띄운 서버는 진짜 코드 폴더·앱을 절대 바꾸지 않는다
+    return bool(os.environ.get("SETEUK_DATA")) or os.environ.get("SSEUDAM_UPDATE_DRYRUN") == "1"
+
+
+def _log(msg):
+    print("[자동 업데이트] %s" % msg)
+    try:
+        with open(os.path.join(db.DATA_DIR, "update.log"), "a", encoding="utf-8") as f:
+            f.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
+    except OSError:
+        pass
+
+
+def _check_info():
+    fake = os.environ.get("SSEUDAM_UPDATE_FAKE_LATEST")  # 테스트: 가짜 새 버전
+    if fake and _dry_run():
+        return {"enabled": True, "current": version.VERSION, "latest": fake, "notes": "테스트용 가짜 릴리스",
+                "available": vtuple(fake) > vtuple(version.VERSION)}
+    return check(force=True)
+
+
+def busy_reason():
+    """지금 업데이트하면 안 되는 이유 (없으면 빈 문자열)."""
+    idle = time.time() - LAST_POST[0]
+    if idle < IDLE_SEC:
+        return "사용 중 (%d초 전 조작)" % idle
+    conn = db.connect()
+    try:
+        n = conn.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('대기','진행중')").fetchone()[0]
+    finally:
+        conn.close()
+    if n:
+        return "AI 작업 %d개 진행 중" % n
+    try:
+        import whisper
+        if any((m.get("download") or {}).get("status") == "downloading" for m in whisper.status().get("models", [])):
+            return "받아쓰기 모델 내려받는 중"
+    except Exception:  # noqa
+        pass
+    return ""
+
+
+def mark_updating(frm, to, notes=""):
+    db.set_settings({"updated_from": frm, "updated_to": to, "updated_notes": (notes or "")[:3000]})
+
+
+def just_updated(consume=True):
+    """방금 업데이트로 다시 켜졌으면 {from,to,notes} 한 번만 돌려준다."""
+    s = db.get_settings()
+    frm = s.get("updated_from") or ""
+    if not frm:
+        return None
+    out = None
+    if vtuple(version.VERSION) > vtuple(frm):
+        out = {"from": frm, "to": version.VERSION, "notes": s.get("updated_notes") or "",
+               "url": "https://github.com/%s/releases/tag/v%s" % (version.UPDATE_REPO, version.VERSION) if version.UPDATE_REPO else ""}
+    elif s.get("updated_to") == "app" and shell_version() >= version.SHELL_REQUIRED:
+        out = {"from": frm, "to": version.VERSION, "notes": "", "url": "", "app": True}
+    if consume and (out or vtuple(version.VERSION) >= vtuple(frm)):
+        db.set_settings({"updated_from": "", "updated_to": "", "updated_notes": ""})
+    return out
+
+
+def _backed_off():
+    day = time.time() - 86400
+    _auto["fails"] = [t for t in _auto["fails"] if t > day]
+    return len(_auto["fails"]) >= 3
+
+
+def _install(info):
+    db.backup_to(os.path.join(db.BACKUP_DIR, "seteuk-before-auto-update-%s.db" % time.strftime("%Y%m%d-%H%M%S")))
+    if info.get("shell"):
+        mark_updating(version.VERSION, "app")
+        if _dry_run():
+            _log("(테스트) 새 앱 설치를 건너뜀")
+            _auto["state"] = "테스트: 앱 설치했다고 가정"
+            return
+        install_app()
+        return
+    mark_updating(version.VERSION, info["latest"], info.get("notes"))
+    if _dry_run():
+        _log("(테스트) %s 설치를 건너뜀" % info["latest"])
+        _auto["state"] = "테스트: %s 설치했다고 가정" % info["latest"]
+        return
+    apply()
+
+
+def auto_tick(now=None):
+    """한 번 돌기: 필요하면 확인하고, 쉬는 틈이면 설치. 테스트에서 직접 부를 수 있음."""
+    now = now or time.time()
+    if db.get_settings().get("auto_update", "1") != "1":
+        _auto["state"] = "꺼짐"
+        return "off"
+    if _backed_off():
+        _auto["state"] = "실패가 잦아 하루 쉬는 중"
+        return "backoff"
+    if now - _auto["last_check"] >= EVERY_SEC or (_auto["pending"] is None and _auto["last_check"] == 0):
+        _auto["last_check"] = now
+        if shell_outdated():
+            _auto["pending"] = {"shell": True, "latest": "app"}
+        else:
+            info = _check_info()
+            if info.get("error"):
+                _log("확인 실패: %s" % info["error"])
+            _auto["pending"] = info if info.get("available") else None
+        if _auto["pending"]:
+            _log("새 버전 있음: %s" % _auto["pending"].get("latest"))
+    p = _auto["pending"]
+    if not p:
+        _auto["state"] = "최신"
+        return "uptodate"
+    why = busy_reason()
+    if why:
+        _auto["state"] = "새 버전 %s 대기 — %s" % (p.get("latest"), why)
+        return "busy"
+    try:
+        _log("설치 시작: %s → %s" % (version.VERSION, p.get("latest")))
+        _install(p)
+        _auto["pending"] = None if _dry_run() else p
+        return "installed"
+    except Exception as e:  # noqa — 실패해도 지금 버전은 그대로 동작
+        _auto["fails"].append(time.time())
+        _auto["pending"] = None   # 다음 확인 주기(2시간 뒤)에 다시 시도
+        _auto["error"] = str(e)
+        db.set_settings({"updated_from": "", "updated_to": "", "updated_notes": ""})
+        _log("설치 실패 (%d번째): %s" % (len(_auto["fails"]), e))
+        return "failed"
+
+
+def _auto_loop():
+    time.sleep(FIRST_SEC)
+    last = time.time()
+    while True:
+        now = time.time()
+        if now - last > TICK_SEC + 300:   # 시계가 크게 건너뜀 = 잠자기에서 깸 → 바로 확인
+            _auto["last_check"] = 0
+            _auto["pending"] = None
+        last = now
+        try:
+            auto_tick(now)
+        except Exception as e:  # noqa
+            _log("오류: %s" % e)
+        time.sleep(TICK_SEC)
+
+
+def auto_status():
+    return {"state": _auto["state"], "error": _auto["error"], "pending": (_auto["pending"] or {}).get("latest")}
+
+
+def start_auto():
+    if os.environ.get("SETEUK_DATA") and os.environ.get("SSEUDAM_TEST_AUTOUPDATE") != "1":
+        return False
+    if not version.UPDATE_REPO and not os.environ.get("SSEUDAM_UPDATE_FAKE_LATEST"):
+        return False
+    threading.Thread(target=_auto_loop, daemon=True, name="auto-update").start()
+    return True

@@ -4,7 +4,67 @@
 const $ = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
 const view = $('#view');
-const state = { settings: null, classes: [], jobsActive: 0, lastJobIds: '' };
+const state = { settings: null, classes: [], jobsActive: 0, lastJobIds: '', term: null };
+
+// ───────────────────────── 학기 ─────────────────────────
+// 학년도는 3월에 시작: 3~8월 = 1학기, 9~2월 = 2학기 (1·2월은 전년도 2학기)
+function currentTerm(d) {
+  d = d || new Date();
+  const m = d.getMonth() + 1, y = d.getFullYear();
+  if (m >= 3 && m <= 8) return { year: y, semester: 1 };
+  return m >= 9 ? { year: y, semester: 2 } : { year: y - 1, semester: 2 };
+}
+function nextTerm(t) { return t.semester === 1 ? { year: t.year, semester: 2 } : { year: t.year + 1, semester: 1 }; }
+function prevTerm(t) { return t.semester === 2 ? { year: t.year, semester: 1 } : { year: t.year - 1, semester: 2 }; }
+function termKey(t) { return t.year + '-' + t.semester; }
+function termLabel(t) { return `${t.year}년 ${t.semester}학기`; }
+function sameTerm(a, b) { return a && b && +a.year === +b.year && +a.semester === +b.semester; }
+function isCurrentTerm(t) { return sameTerm(t || state.term, currentTerm()); }
+function inTerm(c, t) { return sameTerm(c, t || state.term); }
+function termClasses(t) { return state.classes.filter(c => inTerm(c, t)); }
+function store(kind, key, val) {
+  try {
+    const st = kind === 'session' ? sessionStorage : localStorage;
+    if (val === undefined) return st.getItem(key);
+    st.setItem(key, val);
+  } catch (e) { return null; }
+  return null;
+}
+(function initTerm() {
+  const saved = store('session', 'sseudam.term');
+  const m = saved && saved.match(/^(\d{4})-([12])$/);
+  state.term = m ? { year: +m[1], semester: +m[2] } : currentTerm();
+})();
+function setTerm(t, go) {
+  state.term = { year: +t.year, semester: +t.semester };
+  store('session', 'sseudam.term', termKey(state.term));
+  renderTermSwitch();
+  if (go && location.hash !== go) location.hash = go; else router(!go);
+}
+function allTerms() {
+  const map = {};
+  [currentTerm(), state.term].concat(state.classes).forEach(c => { if (c && c.year && c.semester) map[termKey(c)] = { year: +c.year, semester: +c.semester }; });
+  return Object.values(map).sort((a, b) => (b.year - a.year) || (b.semester - a.semester));
+}
+function renderTermSwitch() {
+  const sel = $('#term-select'); if (!sel) return;
+  const cur = currentTerm();
+  sel.innerHTML = allTerms().map(t => `<option value="${termKey(t)}" ${sameTerm(t, state.term) ? 'selected' : ''}>${termLabel(t)}${sameTerm(t, cur) ? ' · 지금' : ''}</option>`).join('')
+    + '<option value="archive">지난 학기 모아 보기…</option>';
+  const b = $('#term-banner');
+  if (isCurrentTerm()) b.classList.add('hidden');
+  else {
+    b.innerHTML = `<span>📚 <b>${termLabel(state.term)}</b> 기록을 보고 있어요. 대시보드·학급·초안이 이 학기 것만 보여요.</span> <button class="sm" id="tb-back">이번 학기(${termLabel(cur)})로 돌아가기</button>`;
+    b.classList.remove('hidden');
+    $('#tb-back').onclick = () => setTerm(cur);
+  }
+}
+$('#term-select').addEventListener('change', e => {
+  const v = e.target.value;
+  if (v === 'archive') { renderTermSwitch(); location.hash = '#/archive'; return; }
+  const [y, sm] = v.split('-').map(Number);
+  setTerm({ year: y, semester: sm });
+});
 
 const CATEGORIES = ['발표', '토론', '탐구', '과제', '수업태도', '협업', '질문', '성장', '상담', '기타'];
 const STATUS_COLOR = { '보관됨': 'amber', '대기중': 'blue', '전사중': 'blue', '전사완료': 'blue', '분리중': 'blue',
@@ -34,27 +94,81 @@ async function api(path, body, opts) {
   }
   let res;
   try { res = await fetch(path, init); }
-  catch (e) { throw new Error('프로그램(서버)과 연결이 끊겼습니다. "쓰담 시작"을 다시 실행하세요.'); }
+  catch (e) { waitForServer(); throw new Error('프로그램(서버)과 연결이 끊겼습니다. "쓰담 시작"을 다시 실행하세요.'); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { const err = new Error(data.error || ('오류 ' + res.status)); if (!opts.silent) toast(err.message, true); throw err; }
   return data;
 }
 
-let toastTimer;
-function toast(msg, isErr) {
-  const t = $('#toast');
-  t.textContent = msg; t.className = 'toast' + (isErr ? ' err' : '');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), isErr ? 6000 : 2600);
+// 서버가 잠깐 내려가면(업데이트로 다시 켜지는 중) 안내를 띄우고, 다시 응답하면 새로고침
+let waitingServer = false, quitting = false;
+function waitForServer() {
+  if (waitingServer || quitting) return;
+  waitingServer = true;
+  const ov = document.createElement('div');
+  ov.className = 'restart-overlay'; ov.setAttribute('role', 'alertdialog'); ov.setAttribute('aria-live', 'assertive');
+  ov.innerHTML = `<div class="restart-box">${MASCOT}<h2>새 버전으로 바꾸는 중…</h2><p class="muted">잠시만요. 끝나면 화면이 저절로 새로고침돼요.</p><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>`;
+  setTimeout(() => { if (waitingServer) document.body.appendChild(ov); }, 600);
+  const tick = async () => {
+    try {
+      const r = await fetch('/api/version', { cache: 'no-store' });
+      if (r.ok) { location.reload(); return; }
+    } catch (e) { /* 아직 */ }
+    setTimeout(tick, 2000);
+  };
+  setTimeout(tick, 1500);
 }
 
-function modal(html, onMount) {
-  $('#modal-box').innerHTML = html;
-  $('#modal').classList.remove('hidden');
-  if (onMount) onMount($('#modal-box'));
+let toastTimer;
+function toast(msg, isErr, action) {
+  const t = $('#toast');
+  t.textContent = msg; t.className = 'toast' + (isErr ? ' err' : '');
+  if (action) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = action.label;
+    b.onclick = async () => { t.classList.add('hidden'); await action.run(); };
+    t.appendChild(b);
+  }
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), isErr ? 6000 : (action ? 6500 : 2600));
 }
-function closeModal() { $('#modal').classList.add('hidden'); $('#modal-box').innerHTML = ''; }
+// 받침에 맞는 조사 (을/를)
+function eul(word) {
+  const w = String(word || '').replace(/[\s'")\]]+$/, ''), c = w.charCodeAt(w.length - 1);
+  if (c >= 0xAC00 && c <= 0xD7A3) return (c - 0xAC00) % 28 ? '을' : '를';
+  return /[0-9]$/.test(w) ? '을' : '을(를)';
+}
+// 휴지통으로 옮긴 뒤 '되돌리기' 버튼이 달린 알림
+function trashedToast(what, res, after) {
+  if (!res || !res.trash_id) { toast(`${what}${eul(what)} 지웠어요`); return; }
+  toast(`${what}${eul(what)} 휴지통으로 옮겼어요`, false, { label: '되돌리기', run: async () => {
+    await api('/api/trash/restore', { id: res.trash_id }); toast('되살렸어요'); after ? after() : router(true);
+  } });
+}
+
+let modalReturnFocus = null;
+function modal(html, onMount) {
+  const wasOpen = !$('#modal').classList.contains('hidden');
+  if (!wasOpen) modalReturnFocus = document.activeElement;
+  const box = $('#modal-box');
+  box.innerHTML = html;
+  const h = $('h2', box);
+  if (h) { h.id = 'modal-title'; box.setAttribute('aria-labelledby', 'modal-title'); } else box.removeAttribute('aria-labelledby');
+  $('#modal').classList.remove('hidden');
+  if (onMount) onMount(box);
+  if (!box.contains(document.activeElement)) {
+    const f = $('input:not([type=hidden]):not([disabled]), textarea, select, button.primary, button', box);
+    if (f) f.focus();
+  }
+}
+function closeModal() {
+  if ($('#modal').classList.contains('hidden')) return;
+  $('#modal').classList.add('hidden'); $('#modal-box').innerHTML = '';
+  if (modalReturnFocus && document.body.contains(modalReturnFocus)) { try { modalReturnFocus.focus(); } catch (e) { /* */ } }
+  modalReturnFocus = null;
+}
 $('#modal').addEventListener('mousedown', e => { if (e.target.id === 'modal') closeModal(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { if (!$('#search').classList.contains('hidden')) closeSearch(); else closeModal(); }
+});
 
 function confirmBox(msg) { return window.confirm(msg); }
 
@@ -70,8 +184,11 @@ async function copyText(text) {
 async function loadClasses() { state.classes = (await api('/api/classes')).classes; return state.classes; }
 function classOptions(selected, allowEmpty) {
   let h = allowEmpty ? `<option value="">${allowEmpty === true ? '학급 미지정' : esc(allowEmpty)}</option>` : '';
-  for (const c of state.classes) h += `<option value="${c.id}" ${String(c.id) === String(selected) ? 'selected' : ''}>${esc(c.label)} (${c.year}-${c.semester}학기)</option>`;
-  return h;
+  const opt = c => `<option value="${c.id}" ${String(c.id) === String(selected) ? 'selected' : ''}>${esc(c.label)} (${c.year}-${c.semester}학기)</option>`;
+  const mine = termClasses(), others = state.classes.filter(c => !inTerm(c));
+  if (!others.length) return h + mine.map(opt).join('');
+  if (mine.length) h += `<optgroup label="${esc(termLabel(state.term))}">${mine.map(opt).join('')}</optgroup>`;
+  return h + `<optgroup label="다른 학기">${others.map(opt).join('')}</optgroup>`;
 }
 function badge(status) { return `<span class="badge ${STATUS_COLOR[status] || ''}">${esc(status)}</span>`; }
 function kindBadge(kind) { return `<span class="badge ${kind === '상담' ? 'violet' : 'blue'}">${esc(kind || '수업')}</span>`; }
@@ -191,11 +308,16 @@ async function router(soft) {
   const hash = location.hash.replace(/^#/, '') || '/';
   const parts = hash.split('/').filter(Boolean);
   const nav = { '': 'dashboard', recordings: 'recordings', recording: 'recordings', classes: 'classes', class: 'classes',
-    student: 'classes', drafts: 'drafts', settings: 'settings', prompts: 'prompts' }[parts[0] || ''];
-  $$('.sidebar nav a').forEach(a => a.classList.toggle('active', a.dataset.nav === nav));
+    student: 'classes', drafts: 'drafts', settings: 'settings', prompts: 'prompts', trash: 'trash', archive: 'archive' }[parts[0] || ''];
+  $$('.sidebar nav a').forEach(a => {
+    a.classList.toggle('active', a.dataset.nav === nav);
+    if (a.dataset.nav === nav) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
   const scroll = soft ? window.scrollY : 0;
+  if (!soft) { view.classList.remove('enter'); void view.offsetWidth; view.classList.add('enter'); }
   try {
     await loadClasses();
+    renderTermSwitch();
     switch (parts[0]) {
       case undefined: await viewDashboard(); break;
       case 'recordings': await viewRecordings(parts[1]); break;
@@ -206,6 +328,8 @@ async function router(soft) {
       case 'drafts': await viewDrafts(parts[1], parts[2]); break;
       case 'settings': await viewSettings(parts[1]); break;
       case 'prompts': await viewPrompts(); break;
+      case 'trash': await viewTrash(); break;
+      case 'archive': await viewArchive(); break;
       default: await viewDashboard();
     }
   } catch (e) {
@@ -219,11 +343,27 @@ window.addEventListener('hashchange', () => { closeModal(); router(false); });
 
 // ───────────────────────── 대시보드 ─────────────────────────
 
+const MASCOT = `<svg class="mascot-big" viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="mg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5B7CFA"/><stop offset="1" stop-color="#9B8CF5"/></linearGradient></defs>
+  <path d="M24 5c10.5 0 19 7.2 19 16.2S34.5 37.4 24 37.4c-1.6 0-3.1-.2-4.6-.5L11 42.6c-.9.6-2-.2-1.7-1.2l1.8-6.3C7.4 32.2 5 27 5 21.2 5 12.2 13.5 5 24 5z" fill="url(#mg2)"/>
+  <circle cx="17.5" cy="20.5" r="2.6" fill="#fff"/><circle cx="30.5" cy="20.5" r="2.6" fill="#fff"/><path d="M19.5 27c2.6 2.4 6.4 2.4 9 0" stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+  <circle cx="13" cy="26" r="2" fill="#FF8A73" opacity=".75"/><circle cx="35" cy="26" r="2" fill="#FF8A73" opacity=".75"/></svg>`;
+
 async function viewDashboard() {
-  const d = await api('/api/dashboard');
+  const d = await api(`/api/dashboard?year=${state.term.year}&semester=${state.term.semester}`);
   const t = d.totals;
+  if (!t.classes && t.all_classes) {
+    const prev = termClasses(prevTerm(state.term));
+    view.innerHTML = `<div class="empty card">${MASCOT}
+      <h2>${termLabel(state.term)} 학급이 아직 없어요</h2>
+      <p>${prev.length ? `지난 학기(${termLabel(prevTerm(state.term))}) 학급 ${prev.length}개의 명단을 그대로 가져올 수 있어요. 관찰기록은 옮기지 않아요.` : '학급을 만들고 명단을 붙여넣으면 시작할 수 있어요.'}</p>
+      <div class="actions" style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px">
+        ${prev.length ? '<button class="primary" id="dash-prep">✨ 새 학기 준비하기</button>' : ''}
+        <a class="btn" href="#/classes">학급 만들기</a><a class="btn" href="#/archive">지난 학기 보기</a></div></div>`;
+    if ($('#dash-prep')) $('#dash-prep').onclick = () => newTermModal({ from: prevTerm(state.term), to: state.term });
+    return;
+  }
   if (!t.classes) {
-    view.innerHTML = `<div class="empty card">
+    view.innerHTML = `<div class="empty card">${MASCOT}
       <h2>쓰담에 오신 것을 환영합니다</h2>
       <p>수업 중 녹음한 학생 평가와 상담 기록을 학생별로 모아 세특 초안까지 만들어 주는 도구입니다.</p>
       <div class="steps">
@@ -236,8 +376,8 @@ async function viewDashboard() {
   }
   const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
   view.innerHTML = `
-    <div class="page-head"><div><h1>대시보드</h1><div class="muted">${new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</div></div>
-      <div class="actions"><button id="dash-xlsx">전체 엑셀로 저장</button><a class="btn" href="#/recordings">+ 녹음 올리기</a></div></div>
+    <div class="page-head"><div><h1>${teacherHello()}</h1><div class="muted">${new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} · ${termLabel(state.term)}</div></div>
+      <div class="actions"><button id="dash-xlsx">전체 엑셀로 저장</button><a class="btn primary" href="#/recordings">+ 녹음 올리기</a></div></div>
     <div id="wh-banner"></div>
     <div class="stats">
       <div class="stat"><div class="label">학생</div><div class="value">${t.students}</div><div class="sub">${t.classes}개 학급</div></div>
@@ -248,7 +388,7 @@ async function viewDashboard() {
     </div>
     <div class="grid grid-2">
       <div class="card">
-        <div class="section-title"><h2>학급별 진행</h2><div class="legend"><span><i style="background:var(--accent)"></i>기록 있음</span><span><i style="background:var(--green)"></i>초안 작성</span></div></div>
+        <div class="section-title"><h2>학급별 진행</h2><div class="legend"><span><i style="background:var(--grad)"></i>기록 있음</span><span><i style="background:var(--mint)"></i>초안 작성</span></div></div>
         <div class="table-wrap" style="border:none"><table>
           <thead><tr><th>학급</th><th class="right">학생</th><th class="right">기록</th><th style="width:38%">진행률</th></tr></thead>
           <tbody>${d.classes.map(c => `<tr class="clickable" data-href="#/drafts/${c.id}">
@@ -260,7 +400,7 @@ async function viewDashboard() {
           </tbody></table></div>
       </div>
       <div class="card chart">
-        <div class="section-title"><h2>주간 관찰기록</h2><div class="legend"><span><i style="background:var(--accent)"></i>수업</span><span><i style="background:var(--violet)"></i>상담</span></div></div>
+        <div class="section-title"><h2>주간 관찰기록</h2><div class="legend"><span><i style="background:var(--accent-fill)"></i>수업</span><span><i style="background:var(--coral)"></i>상담</span></div></div>
         ${weeklyChart(d.weeks)}
         <h3 style="margin-top:16px">영역 분포</h3>
         <div class="chips">${d.categories.map(c => `<span class="badge blue">${esc(c.category)} ${c.n}</span>`).join('') || '<span class="muted small">아직 기록이 없습니다</span>'}</div>
@@ -268,6 +408,7 @@ async function viewDashboard() {
       <div class="card">
         <h2>기록이 부족한 학생</h2>
         <p class="help" style="margin-top:-6px;margin-bottom:10px">다음 수업에서 관찰해 보면 좋은 학생들입니다.</p>
+        ${d.needy.length ? '' : '<p class="muted small">아직 학생이 없어요</p>'}
         <table><tbody>${d.needy.map(s => `<tr class="clickable" data-href="#/student/${s.id}">
           <td>${esc(s.label)}</td><td>${s.number}번 <b>${esc(s.name)}</b></td>
           <td class="right"><span class="badge ${s.notes ? 'amber' : 'red'}">기록 ${s.notes}건</span></td>
@@ -283,6 +424,13 @@ async function viewDashboard() {
   bindRowLinks();
   $('#dash-xlsx').onclick = () => exportXlsx(null);
   whisperBanner($('#wh-banner'));
+}
+
+function teacherHello() {
+  const n = (state.settings && state.settings.teacher_name) || '';
+  const h = new Date().getHours();
+  const hi = h < 11 ? '좋은 아침이에요' : h < 17 ? '안녕하세요' : '오늘도 수고 많으셨어요';
+  return n ? `${esc(n)} 선생님, ${hi}` : `${hi} 👋`;
 }
 
 function weeklyChart(weeks) {
@@ -301,8 +449,8 @@ function weeklyChart(weeks) {
   weeks.forEach((w, i) => {
     const x = pad.l + i * bw + bw * 0.18, bwi = bw * 0.64;
     const a = w['수업'], b = w['상담'];
-    if (a) s += `<rect x="${x}" y="${y(a)}" width="${bwi}" height="${y(0) - y(a)}" rx="2" fill="var(--accent)"><title>${w.label} 주 수업 ${a}건</title></rect>`;
-    if (b) s += `<rect x="${x}" y="${y(a + b)}" width="${bwi}" height="${y(a) - y(a + b)}" rx="2" fill="var(--violet)"><title>${w.label} 주 상담 ${b}건</title></rect>`;
+    if (a) s += `<rect x="${x}" y="${y(a)}" width="${bwi}" height="${y(0) - y(a)}" rx="4" fill="var(--accent-fill)"><title>${w.label} 주 수업 ${a}건</title></rect>`;
+    if (b) s += `<rect x="${x}" y="${y(a + b)}" width="${bwi}" height="${y(a) - y(a + b)}" rx="2" fill="var(--coral)"><title>${w.label} 주 상담 ${b}건</title></rect>`;
     if (i % 2 === weeks.length % 2 || i === weeks.length - 1) s += `<text x="${x + bwi / 2}" y="${H - 6}" text-anchor="middle">${w.label}</text>`;
   });
   return s + '</svg>';
@@ -336,7 +484,7 @@ async function viewRecordings(classFilter) {
         <label class="field"><span>제목 (선택)</span><input id="up-title" placeholder="예: 3교시 토론 수업"></label>
       </div>
       <div data-pane="audio">
-        <div class="dropzone" id="drop"><strong>여기에 녹음 파일을 끌어다 놓거나 클릭해서 선택</strong>m4a, mp3, wav 등 · 여러 개 가능 · 텍스트(.txt) 전사본도 가능</div>
+        <div class="dropzone" id="drop" role="button" tabindex="0" aria-label="녹음 파일 고르기"><strong>여기에 녹음 파일을 끌어다 놓거나 클릭해서 선택</strong>m4a, mp3, wav 등 · 여러 개 가능 · 텍스트(.txt) 전사본도 가능</div>
         <input type="file" id="file" multiple accept="audio/*,.m4a,.txt" class="hidden">
         <label class="check" style="margin-top:10px"><input type="checkbox" id="up-auto" ${isApi ? 'checked' : 'disabled'}> 올린 뒤 자동으로 전사 → 학생별 분리 ${isApi ? '' : '<span class="muted small">(API 모드에서만 가능)</span>'}</label>
       </div>
@@ -380,6 +528,7 @@ async function viewRecordings(classFilter) {
   }).catch(() => {});
   const drop = $('#drop'), file = $('#file');
   drop.onclick = () => file.click();
+  drop.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); file.click(); } };
   drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
   drop.ondragleave = () => drop.classList.remove('over');
   drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); uploadFiles(e.dataTransfer.files); };
@@ -429,7 +578,7 @@ async function viewRecording(id) {
       <div>${kindBadge(r.kind)} ${badge(r.status)} <span class="muted small">${esc(fmtDate(r.recorded_at))} · ${esc(r.original_name || '')}</span></div></div>
       <div class="actions">
         ${r.has_audio ? `<button id="b-reveal">Finder에서 보기</button>` : ''}
-        <button class="danger" id="b-del">삭제</button></div></div>
+        <button class="danger" id="b-del">휴지통으로</button></div></div>
     ${r.error ? `<div class="error-box">${esc(r.error)}</div>` : ''}
     <div class="split">
       <div class="stack">
@@ -466,7 +615,7 @@ async function viewRecording(id) {
             ${g.items.map(n => `<div class="note" data-note="${n.id}">
               <div class="meta"><span class="badge blue">${esc(n.category || '기타')}</span>
                 <span class="tools">${d.areas.length > 1 ? `<select class="n-area" style="width:auto;padding:2px 6px;font-size:12px">${areaOptions(d.areas, n.area_eff)}</select>` : ''}<select class="n-move" style="width:auto;padding:2px 6px;font-size:12px">${studentOpts(n.student_id)}</select>
-                <button class="sm n-edit">수정</button><button class="sm danger n-del">삭제</button></span></div>
+                <button class="sm n-edit">수정</button><button class="sm danger n-del" aria-label="이 관찰기록 휴지통으로">삭제</button></span></div>
               <div class="content">${esc(n.content)}</div>
               ${n.evidence ? `<div class="evidence">${esc(n.evidence)}</div>` : ''}</div>`).join('')}
           </div>`).join('')}
@@ -487,10 +636,11 @@ async function viewRecording(id) {
   const reload = () => router(true);
   if ($('#b-reveal')) $('#b-reveal').onclick = () => api('/api/recordings/reveal', { id: r.id });
   $('#b-del').onclick = async () => {
-    if (!confirmBox('이 녹음 기록을 삭제할까요?\n(이 녹음에서 나온 학생 관찰기록은 남겨둡니다)')) return;
-    const delAudio = r.has_audio && confirmBox('보관된 녹음 파일도 함께 지울까요?\n[확인] 파일도 삭제  [취소] 파일은 남김');
-    await api('/api/recordings/delete', { id: r.id, delete_audio: delAudio });
+    if (!confirmBox('이 녹음을 휴지통으로 옮길까요?\n30일 안에 되살릴 수 있어요. (이 녹음에서 나온 학생 관찰기록은 그대로 남아요)')) return;
+    const delAudio = r.has_audio && confirmBox('휴지통을 비울 때 녹음 파일도 함께 지울까요?\n[확인] 파일도 지움  [취소] 파일은 남김');
+    const res = await api('/api/recordings/delete', { id: r.id, delete_audio: delAudio });
     location.hash = '#/recordings';
+    trashedToast('녹음', res, () => { location.hash = '#/recording/' + r.id; });
   };
   $('#r-save').onclick = async () => {
     await api('/api/recordings/update', { id: r.id, class_id: $('#r-class').value || null, kind: $('#r-kind').value,
@@ -517,7 +667,7 @@ async function viewRecording(id) {
   if ($('#b-done')) $('#b-done').onclick = async () => { await api('/api/recordings/mark_done', { id: r.id }); reload(); };
   $$('[data-note]').forEach(el => {
     const nid = +el.dataset.note, n = d.notes.find(x => x.id === nid);
-    $('.n-del', el).onclick = async () => { await api('/api/notes/delete', { id: nid }); reload(); };
+    $('.n-del', el).onclick = async () => { const res = await api('/api/notes/delete', { id: nid }); trashedToast('관찰기록', res); reload(); };
     $('.n-move', el).onchange = async e => {
       if (!e.target.value) return;
       await api('/api/notes/save', { ...n, student_id: +e.target.value, use_in_draft: !!n.use_in_draft }); toast('학생을 변경했습니다'); reload();
@@ -604,9 +754,16 @@ function classFormValues() {
 }
 
 async function viewClasses() {
-  const y = new Date().getFullYear(), sem = (new Date().getMonth() + 1) >= 8 ? 2 : 1;
+  const y = state.term.year, sem = state.term.semester;
+  const list = termClasses();
+  const prevList = termClasses(prevTerm(state.term));
+  const others = state.classes.length - list.length;
   view.innerHTML = `
-    <div class="page-head"><div><h1>학급·학생</h1><div class="muted">수업하는 반, 담임 학급, 동아리를 관리합니다. 과목이 다르면 같은 반도 따로 만드세요.</div></div></div>
+    <div class="page-head"><div><h1>학급·학생</h1><div class="muted">${termLabel(state.term)} · 수업하는 반, 담임 학급, 동아리를 관리해요. 과목이 다르면 같은 반도 따로 만드세요.</div></div>
+      <div class="actions"><button id="c-prep">✨ 새 학기 준비</button><a class="btn" href="#/archive">지난 학기</a></div></div>
+    ${!list.length && prevList.length ? `<div class="card" style="border-color:var(--accent-fill)">
+      <div class="section-title"><h2>지난 학기 명단을 가져올까요?</h2><button class="primary" id="c-prep2">명단 가져오기</button></div>
+      <p class="muted small" style="margin:0">${termLabel(prevTerm(state.term))}의 학급 ${prevList.length}개(${prevList.slice(0, 4).map(c => esc(c.label)).join(', ')}${prevList.length > 4 ? ' …' : ''})를 ${termLabel(state.term)}로 복사해요. 학생 번호·이름·별칭만 옮기고 관찰기록은 옮기지 않아요.</p></div>` : ''}
     <div class="card">
       <h2>새 학급</h2>
       <div class="row">${classFormFields({ year: y, semester: sem, kind: '교과' })}
@@ -615,18 +772,24 @@ async function viewClasses() {
       <p class="help" id="c-kind-help"></p>
     </div>
     <div class="card">
-      <h2>학급 목록</h2>
-      ${state.classes.length ? `<div class="table-wrap"><table><thead><tr><th>학급</th><th>유형</th><th>학기</th><th class="right">학생 수</th><th></th></tr></thead><tbody>
-        ${state.classes.map(c => `<tr class="clickable" data-href="#/class/${c.id}"><td><b>${esc(c.label)}</b></td><td><span class="badge">${esc(c.kind || '교과')}</span></td><td>${c.year}년 ${c.semester}학기</td>
-          <td class="num">${c.students}</td><td class="right"><a href="#/drafts/${c.id}" class="small">초안 →</a></td></tr>`).join('')}
-      </tbody></table></div>` : '<p class="muted">아직 학급이 없습니다.</p>'}
+      <div class="section-title"><h2>${termLabel(state.term)} 학급 ${list.length}개</h2>${others ? `<a class="small" href="#/archive">다른 학기 학급 ${others}개 보기 →</a>` : ''}</div>
+      ${list.length ? `<div class="table-wrap"><table><thead><tr><th>학급</th><th>유형</th><th class="right">학생 수</th><th class="right">관찰기록</th><th></th></tr></thead><tbody>
+        ${list.map(c => `<tr class="clickable" data-href="#/class/${c.id}"><td><b>${esc(c.label)}</b></td><td><span class="badge ${{ '담임': 'violet', '동아리': 'green', '기타': 'amber' }[c.kind] || 'blue'}">${esc(c.kind || '교과')}</span></td>
+          <td class="num">${c.students}</td><td class="num">${c.notes || 0}</td><td class="right"><a href="#/drafts/${c.id}" class="small">초안 →</a></td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="muted">이 학기 학급이 아직 없어요. 위에서 만들거나 지난 학기 명단을 가져오세요.</p>'}
     </div>`;
   bindRowLinks();
   bindClassForm();
+  $('#c-prep').onclick = () => (list.length || !prevList.length)
+    ? newTermModal({ from: state.term, to: nextTerm(state.term) })
+    : newTermModal({ from: prevTerm(state.term), to: state.term });
+  if ($('#c-prep2')) $('#c-prep2').onclick = () => newTermModal({ from: prevTerm(state.term), to: state.term });
   $('#c-add').onclick = async () => {
-    const r = await api('/api/classes/save', classFormValues());
-    toast('만들었습니다. 명단을 붙여넣으세요.');
-    location.hash = '#/class/' + r.id;
+    const v = classFormValues();
+    const r = await api('/api/classes/save', v);
+    toast('만들었어요. 명단을 붙여넣으세요.');
+    if (!sameTerm({ year: +v.year, semester: +v.semester }, state.term)) setTerm({ year: +v.year, semester: +v.semester }, '#/class/' + r.id);
+    else location.hash = '#/class/' + r.id;
   };
 }
 
@@ -636,7 +799,7 @@ async function viewClass(id) {
   const club = c.kind === '동아리';
   view.innerHTML = `
     <div class="page-head"><div><a href="#/classes" class="small">← 학급 목록</a><h1>${esc(c.label)}</h1><div class="muted">${esc(c.kind || '교과')} · ${c.year}년 ${c.semester}학기 · 학생 ${d.students.length}명 · 기재 영역: ${d.areas.map(a => esc(a.name)).join(', ')}</div></div>
-      <div class="actions"><a class="btn" href="#/recordings/${c.id}">이 학급 녹음</a><a class="btn" href="#/drafts/${c.id}">초안</a></div></div>
+      <div class="actions"><button id="c-copy" title="이 명단으로 다른 학기 학급 만들기">다음 학기로 명단 복사</button><a class="btn" href="#/recordings/${c.id}">이 학급 녹음</a><a class="btn" href="#/drafts/${c.id}">초안</a></div></div>
     <div class="split">
       <div class="card">
         <div class="section-title"><h2>학생 명단</h2><button class="sm" id="s-add">+ 학생 추가</button></div>
@@ -658,7 +821,7 @@ async function viewClass(id) {
           <h2>학급 정보</h2>
           <div class="row">${classFormFields(c)}</div>
           <p class="help" id="c-kind-help"></p>
-          <div class="row" style="margin-top:10px"><span></span><button class="shrink" id="c-save">저장</button><button class="shrink danger" id="c-del">학급 삭제</button></div>
+          <div class="row" style="margin-top:10px"><span></span><button class="shrink" id="c-save">저장</button><button class="shrink danger" id="c-del">학급 지우기</button></div>
         </div>
       </div>
     </div>`;
@@ -676,11 +839,202 @@ async function viewClass(id) {
   $('#s-add').onclick = () => editStudentModal({ class_id: c.id, number: club ? '' : (d.students.at(-1)?.number || 0) + 1 }, reload);
   $$('.s-edit').forEach(b => b.onclick = () => editStudentModal(d.students.find(s => s.id === +b.closest('tr').dataset.sid), reload));
   $('#c-save').onclick = async () => { await api('/api/classes/save', Object.assign({ id: c.id }, classFormValues())); toast('저장했습니다'); reload(); };
+  $('#c-copy').onclick = () => { const from = { year: +c.year, semester: +c.semester }; newTermModal({ from, to: nextTerm(from), only: c.id }); };
   $('#c-del').onclick = async () => {
-    if (!confirmBox(`${c.label}와 학생 ${d.students.length}명의 관찰기록·초안을 모두 삭제합니다. 되돌릴 수 없습니다. 계속할까요?`)) return;
-    await api('/api/classes/delete', { id: c.id }); location.hash = '#/classes';
+    if (!confirmBox(`${c.label}와 학생 ${d.students.length}명의 관찰기록·초안을 휴지통으로 옮길까요?\n30일 안에는 휴지통에서 그대로 되살릴 수 있어요.`)) return;
+    const res = await api('/api/classes/delete', { id: c.id }); location.hash = '#/classes';
+    trashedToast(c.label, res, () => { location.hash = '#/class/' + c.id; });
   };
 }
+
+// ───────────────────────── 새 학기 준비 ─────────────────────────
+
+function newTermModal(opt) {
+  const terms = allTerms().filter(t => state.classes.some(c => inTerm(c, t)));
+  let from = opt.from && terms.some(t => sameTerm(t, opt.from)) ? opt.from : (terms[0] || state.term);
+  const cur = currentTerm();
+  const targetsFor = f => {
+    const m = {};
+    [opt.to, nextTerm(f), cur, nextTerm(cur), state.term].forEach(t => { if (t && !sameTerm(t, f)) m[termKey(t)] = t; });
+    return Object.values(m).sort((a, b) => (b.year - a.year) || (b.semester - a.semester));
+  };
+  const render = () => {
+    const src = termClasses(from);
+    const targets = targetsFor(from);
+    const to = opt.to && !sameTerm(opt.to, from) ? opt.to : nextTerm(from);
+    modal(`<h2>✨ 새 학기 준비</h2>
+      <p class="muted" style="margin-top:0">학급 명단(번호·이름·별칭)을 다른 학기로 복사해요. <b>관찰기록과 초안은 옮기지 않아요.</b> 이미 같은 학급이 있으면 빠진 학생만 더해요.</p>
+      <div class="row">
+        <label class="field"><span>어느 학기에서</span><select id="nt-from">${terms.map(t => `<option value="${termKey(t)}" ${sameTerm(t, from) ? 'selected' : ''}>${termLabel(t)}</option>`).join('')}</select></label>
+        <label class="field"><span>어느 학기로</span><select id="nt-to">${targets.map(t => `<option value="${termKey(t)}" ${sameTerm(t, to) ? 'selected' : ''}>${termLabel(t)}${sameTerm(t, cur) ? ' (지금)' : ''}</option>`).join('')}</select></label>
+      </div>
+      <h3 style="margin-top:16px">가져올 학급</h3>
+      ${src.length ? `<div class="table-wrap"><table><thead><tr><th style="width:36px"><span class="sr-only">선택</span></th><th>학급</th><th style="width:90px">학년</th><th style="width:90px">반</th><th>과목·이름</th><th class="right">학생</th></tr></thead><tbody>
+        ${src.map(c => { const named = c.kind === '동아리' || c.kind === '기타'; return `<tr data-cid="${c.id}">
+          <td><input type="checkbox" class="nt-on" aria-label="${esc(c.label)} 가져오기" ${!opt.only || opt.only === c.id ? 'checked' : ''}></td>
+          <td><b>${esc(c.label)}</b><div class="small muted">${esc(c.kind || '교과')}</div></td>
+          <td>${named ? '' : `<input type="number" class="nt-grade" min="1" max="6" value="${c.grade ?? ''}" aria-label="학년">`}</td>
+          <td>${named ? '' : `<input type="number" class="nt-no" min="1" value="${c.class_no ?? ''}" aria-label="반">`}</td>
+          <td>${c.kind === '담임' ? '' : `<input class="nt-subj" value="${esc(c.subject || '')}" aria-label="과목 또는 이름">`}</td>
+          <td class="num">${c.students}명</td></tr>`; }).join('')}</tbody></table></div>` : '<p class="muted">이 학기에는 학급이 없어요.</p>'}
+      <label class="check" style="margin-top:10px"><input type="checkbox" id="nt-memo"> 학생별 교사 메모도 함께 복사</label>
+      <p class="help">새 학년도로 넘어갈 때는 학년·반을 바꿔 주세요. 담임 학급은 학년도마다 학생이 달라지니 새 명단을 붙여넣는 편이 정확해요.</p>
+      <div class="modal-actions"><button id="nt-x">닫기</button><button class="primary" id="nt-go" ${src.length ? '' : 'disabled'}>명단 복사하기</button></div>`, box => {
+      $('#nt-x', box).onclick = closeModal;
+      $('#nt-from', box).onchange = e => { const [y, m] = e.target.value.split('-').map(Number); from = { year: y, semester: m }; opt.only = null; opt.to = null; render(); };
+      $('#nt-go', box).onclick = async () => {
+        const [ty, ts] = $('#nt-to', box).value.split('-').map(Number);
+        const items = $$('tr[data-cid]', box).filter(tr => $('.nt-on', tr).checked).map(tr => {
+          const it = { id: +tr.dataset.cid };
+          if ($('.nt-grade', tr)) it.grade = $('.nt-grade', tr).value;
+          if ($('.nt-no', tr)) it.class_no = $('.nt-no', tr).value;
+          if ($('.nt-subj', tr)) it.subject = $('.nt-subj', tr).value;
+          return it;
+        });
+        if (!items.length) return toast('가져올 학급을 골라 주세요', true);
+        const r = await api('/api/classes/copy', { year: ty, semester: ts, items, memo: $('#nt-memo', box).checked });
+        closeModal();
+        toast(`${termLabel({ year: ty, semester: ts })}에 학급 ${r.classes}개, 학생 ${r.students}명을 준비했어요`);
+        setTerm({ year: ty, semester: ts }, '#/classes');
+      };
+    });
+  };
+  render();
+}
+
+// ───────────────────────── 지난 학기 ─────────────────────────
+
+async function viewArchive() {
+  const cur = currentTerm();
+  const terms = allTerms().filter(t => state.classes.some(c => inTerm(c, t)));
+  const past = terms.filter(t => !sameTerm(t, cur));
+  view.innerHTML = `
+    <div class="page-head"><div><h1>지난 학기</h1><div class="muted">예전 학기의 학급과 기록을 그대로 꺼내 볼 수 있어요. 학기를 고르면 대시보드·학급·초안이 그 학기로 바뀌어요.</div></div>
+      <div class="actions"><button id="ar-prep">✨ 새 학기 준비</button></div></div>
+    ${past.length ? past.map(t => {
+      const list = termClasses(t);
+      const st = list.reduce((a, c) => a + (c.students || 0), 0), nt = list.reduce((a, c) => a + (c.notes || 0), 0);
+      return `<div class="card term-card">
+        <div class="section-title"><h2>${termLabel(t)} ${sameTerm(t, state.term) ? '<span class="badge blue">보는 중</span>' : ''} ${t.year > cur.year || (t.year === cur.year && t.semester > cur.semester) ? '<span class="badge violet">다음 학기</span>' : ''}</h2>
+          <span class="muted small">학급 ${list.length} · 학생 ${st}명 · 관찰기록 ${nt}건 <button class="sm" data-term="${termKey(t)}">이 학기 보기</button></span></div>
+        <div class="class-tiles">${list.map(c => `<a class="class-tile" href="#/class/${c.id}"><b>${esc(c.label)}</b><span class="small muted">${esc(c.kind || '교과')} · 학생 ${c.students}명 · 기록 ${c.notes || 0}건</span></a>`).join('')}</div>
+      </div>`;
+    }).join('') : `<div class="empty card">${MASCOT}<h2>지난 학기 기록이 아직 없어요</h2><p>학기가 바뀌면 여기에서 예전 학급을 찾아볼 수 있어요.</p></div>`}`;
+  $$('[data-term]').forEach(b => b.onclick = () => { const [y, m] = b.dataset.term.split('-').map(Number); setTerm({ year: y, semester: m }, '#/'); });
+  $('#ar-prep').onclick = () => newTermModal({ from: prevTerm(cur), to: cur });
+}
+
+// ───────────────────────── 휴지통 ─────────────────────────
+
+async function viewTrash() {
+  const d = await api('/api/trash');
+  const icon = { class: '🏫', student: '🧑‍🎓', recording: '🎙', note: '📝', draft: '📄' };
+  view.innerHTML = `
+    <div class="page-head"><div><h1>휴지통</h1><div class="muted">지운 학급·학생·녹음·관찰기록·초안은 ${d.keep_days}일 동안 여기 있어요. 그 뒤엔 자동으로 비워져요.</div></div>
+      <div class="actions">${d.items.length ? '<button class="danger" id="tr-empty">휴지통 비우기</button>' : ''}</div></div>
+    <div class="card">
+      ${d.items.length ? d.items.map(t => `<div class="trash-item" data-tid="${t.id}">
+        <span class="badge ${{ class: 'violet', student: 'blue', recording: 'amber', note: 'green', draft: '' }[t.kind] || ''}"><span aria-hidden="true">${icon[t.kind] || ''}</span> ${esc(t.kind_name)}</span>
+        <div class="body"><div class="title">${esc(t.title)}</div><div class="small muted">${esc(t.detail)} · ${esc(fmtDate(t.deleted_at))}에 지움 · <span class="${t.days_left <= 3 ? 'bad-text' : ''}">${t.days_left}일 남음</span></div></div>
+        <div class="actions"><button class="sm primary tr-restore">되살리기</button><button class="sm danger tr-del">영구 삭제</button></div></div>`).join('')
+      : `<div class="empty">${MASCOT}<h2>휴지통이 비어 있어요</h2><p>실수로 지워도 걱정 마세요. ${d.keep_days}일 동안은 여기서 되살릴 수 있어요.</p></div>`}
+    </div>`;
+  $$('[data-tid]').forEach(el => {
+    const t = d.items.find(x => x.id === +el.dataset.tid);
+    $('.tr-restore', el).onclick = async () => {
+      const r = await api('/api/trash/restore', { id: t.id });
+      const go = r.id && { class: '#/class/', student: '#/student/', recording: '#/recording/' }[r.kind];
+      toast(`'${t.title}'${eul(t.title)} 되살렸어요`, false, go ? { label: '보러 가기', run: () => { location.hash = go + r.id; } } : null);
+      router(true);
+    };
+    $('.tr-del', el).onclick = async () => {
+      if (!confirmBox(`'${t.title}'${eul(t.title)} 영구 삭제할까요?\n다시는 되살릴 수 없어요.`)) return;
+      await api('/api/trash/delete', { id: t.id }); toast('영구 삭제했어요'); router(true);
+    };
+  });
+  if ($('#tr-empty')) $('#tr-empty').onclick = async () => {
+    if (!confirmBox(`휴지통의 ${d.items.length}개 항목을 모두 영구 삭제할까요?\n다시는 되살릴 수 없어요.`)) return;
+    await api('/api/trash/empty', {}); toast('휴지통을 비웠어요'); router(true);
+  };
+}
+
+// ───────────────────────── 검색 (⌘K) ─────────────────────────
+
+const searchState = { timer: null, seq: 0, hits: [], sel: 0, returnFocus: null };
+function openSearch() {
+  searchState.returnFocus = document.activeElement;
+  $('#search').classList.remove('hidden');
+  const q = $('#search-q'); q.focus(); q.select();
+  if (!q.value) renderSearch(null);
+}
+function closeSearch() {
+  $('#search').classList.add('hidden');
+  if (searchState.returnFocus && document.body.contains(searchState.returnFocus)) { try { searchState.returnFocus.focus(); } catch (e) { /* */ } }
+}
+function hl(text, q) {
+  const t = String(text || ''); if (!q) return esc(t);
+  const i = t.toLowerCase().indexOf(q.toLowerCase());
+  return i < 0 ? esc(t) : esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + q.length)) + '</mark>' + esc(t.slice(i + q.length));
+}
+function renderSearch(d) {
+  const box = $('#search-results');
+  if (!d) {
+    box.innerHTML = `<div class="none">학생 이름·별칭, 관찰기록 내용, 녹음 제목·전사문을 모든 학기에서 찾아요.<br><span class="small">↑↓로 고르고 Enter로 열어요</span></div>`;
+    searchState.hits = []; return;
+  }
+  const q = d.q, hits = [];
+  const term = r => r.year ? `${r.year}-${r.semester}학기` : '';
+  const groups = [
+    ['학급', d.classes, c => ({ href: '#/class/' + c.id, ico: '🏫', t: hl(c.label, q), s: `${term(c)} · 학생 ${c.students}명` })],
+    ['학생', d.students, x => ({ href: '#/student/' + x.id, ico: '🧑‍🎓', t: `${x.number ?? ''}${x.number != null ? '번 ' : ''}${hl(x.name, q)}`, s: `${esc(x.label)} · ${term(x)} · 기록 ${x.notes}건${x.aliases ? ' · 별칭 ' + hl(x.aliases, q) : ''}` })],
+    ['관찰기록', d.notes, n => ({ href: '#/student/' + n.student_id, ico: '📝', t: `${esc(n.name)} <span class="small muted">${esc(n.label)} · ${esc(n.date || '')}</span>`, s: hl(n.snippet, q) })],
+    ['녹음', d.recordings, r => ({ href: '#/recording/' + r.id, ico: '🎙', t: hl(r.title || '녹음', q), s: `${esc(fmtDate(r.recorded_at))} · ${esc(r.label)}${r.snippet ? ' · ' + hl(r.snippet, q) : ''}` })],
+  ];
+  let h = '';
+  groups.forEach(([name, list, fn]) => {
+    if (!list.length) return;
+    h += `<h4>${name} ${list.length}</h4>`;
+    list.forEach(item => { const x = fn(item); h += `<a class="hit" role="option" id="hit-${hits.length}" href="${x.href}" data-i="${hits.length}"><span class="ico" aria-hidden="true">${x.ico}</span><span><div class="t">${x.t}</div><div class="s">${x.s}</div></span></a>`; hits.push(x.href); });
+  });
+  box.innerHTML = h || `<div class="none">‘${esc(q)}’에 맞는 결과가 없어요</div>`;
+  searchState.hits = hits; searchState.sel = 0; markSel();
+  $$('.hit', box).forEach(a => {
+    a.onclick = () => closeSearch();
+    a.onmouseenter = () => { searchState.sel = +a.dataset.i; markSel(); };
+  });
+}
+function markSel() {
+  $$('#search-results .hit').forEach(a => a.classList.toggle('sel', +a.dataset.i === searchState.sel));
+  const cur = $(`#hit-${searchState.sel}`);
+  $('#search-q').setAttribute('aria-activedescendant', cur ? cur.id : '');
+  if (cur) cur.setAttribute('aria-selected', 'true');
+  if (cur) cur.scrollIntoView({ block: 'nearest' });
+}
+$('#search-q').addEventListener('input', e => {
+  clearTimeout(searchState.timer);
+  const q = e.target.value.trim();
+  if (!q) { renderSearch(null); return; }
+  searchState.timer = setTimeout(async () => {
+    const seq = ++searchState.seq;
+    const d = await api('/api/search?q=' + encodeURIComponent(q), undefined, { silent: true }).catch(() => null);
+    if (d && seq === searchState.seq) renderSearch(d);
+  }, 180);
+});
+$('#search-q').addEventListener('keydown', e => {
+  const n = searchState.hits.length;
+  if (e.key === 'ArrowDown' && n) { e.preventDefault(); searchState.sel = (searchState.sel + 1) % n; markSel(); }
+  else if (e.key === 'ArrowUp' && n) { e.preventDefault(); searchState.sel = (searchState.sel - 1 + n) % n; markSel(); }
+  else if (e.key === 'Enter' && n) { e.preventDefault(); const href = searchState.hits[searchState.sel]; closeSearch(); location.hash = href; }
+});
+$('#search').addEventListener('mousedown', e => { if (e.target.id === 'search') closeSearch(); });
+$('#search-open').onclick = openSearch;
+if (!/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) $('#search-kbd').textContent = 'Ctrl K';
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault();
+    if ($('#search').classList.contains('hidden')) openSearch(); else closeSearch();
+  }
+});
 
 function editStudentModal(s, onSaved) {
   modal(`<h2>${s.id ? '학생 정보 수정' : '학생 추가'}</h2>
@@ -689,7 +1043,7 @@ function editStudentModal(s, onSaved) {
     <label class="field" style="margin-top:10px"><span>별칭 (쉼표로 구분)</span><input id="st-al" value="${esc(s.aliases || '')}" placeholder="예: 민수, 김민서, 민쑤"></label>
     <p class="help">음성 인식이 이름을 다르게 적는 경우(예: '김민수'→'김민서')를 적어두면 자동 배정됩니다.</p>
     <label class="field" style="margin-top:10px"><span>교사 메모 (세특 생성 시 참고)</span><textarea id="st-memo" rows="3" placeholder="예: 진로 희망 - 환경공학">${esc(s.memo || '')}</textarea></label>
-    <div class="modal-actions">${s.id ? '<button class="danger" id="st-del" style="margin-right:auto">학생 삭제</button>' : ''}<button id="st-cancel">취소</button><button class="primary" id="st-save">저장</button></div>`, box => {
+    <div class="modal-actions">${s.id ? '<button class="danger" id="st-del" style="margin-right:auto">학생 지우기</button>' : ''}<button id="st-cancel">취소</button><button class="primary" id="st-save">저장</button></div>`, box => {
     $('#st-name', box).focus();
     $('#st-cancel', box).onclick = closeModal;
     $('#st-save', box).onclick = async () => {
@@ -698,8 +1052,11 @@ function editStudentModal(s, onSaved) {
       closeModal(); toast('저장했습니다'); onSaved && onSaved();
     };
     if ($('#st-del', box)) $('#st-del', box).onclick = async () => {
-      if (!confirmBox(`${s.name} 학생의 관찰기록과 초안이 모두 삭제됩니다. 계속할까요?`)) return;
-      await api('/api/students/delete', { id: s.id }); closeModal(); onSaved && onSaved();
+      if (!confirmBox(`${s.name} 학생을 관찰기록·초안과 함께 휴지통으로 옮길까요?\n30일 안에 되살릴 수 있어요.`)) return;
+      const res = await api('/api/students/delete', { id: s.id }); closeModal();
+      const back = '#/class/' + s.class_id;
+      if (location.hash.startsWith('#/student/')) location.hash = back; else onSaved && onSaved();
+      trashedToast(s.name + ' 학생', res);
     };
   });
 }
@@ -733,7 +1090,7 @@ async function viewStudent(id, areaParam) {
           <div class="meta">${esc(n.date || '')} ${kindBadge(n.kind)} <span class="badge">${esc(n.category || '기타')}</span>
             ${n.recording_id ? `<a href="#/recording/${n.recording_id}" class="small">${n.has_audio ? '🎙 ' : ''}${esc(n.rec_title || '원본')}</a>` : '<span class="small">직접 입력</span>'}
             <span class="tools"><label class="check small" title="초안 생성에 사용"><input type="checkbox" class="n-use" ${n.use_in_draft ? 'checked' : ''}>초안에 사용</label>
-            <button class="sm n-edit">수정</button><button class="sm danger n-del">삭제</button></span></div>
+            <button class="sm n-edit">수정</button><button class="sm danger n-del" aria-label="이 관찰기록 휴지통으로">삭제</button></span></div>
           <div class="content">${esc(n.content)}</div>
           ${n.evidence ? `<div class="evidence">${esc(n.evidence)}</div>` : ''}</div>`).join('')}
       </div>
@@ -750,7 +1107,7 @@ async function viewStudent(id, areaParam) {
         </div>
         ${drafts.length ? `<div class="card"><h3>버전 기록 ${drafts.length}개</h3>
           ${drafts.map(v => `<div class="version" data-ver="${v.id}"><div class="section-title" style="margin:0"><span>${esc(fmtDate(v.created_at))} · ${v.bytes}B ${v.status === '확정' ? '<span class="badge green">확정</span>' : ''}</span>
-            <button class="link v-del">삭제</button></div><div class="preview">${esc(v.content)}</div></div>`).join('')}</div>` : ''}
+            <button class="link v-del" aria-label="이 버전 휴지통으로">삭제</button></div><div class="preview">${esc(v.content)}</div></div>`).join('')}</div>` : ''}
       </div>
     </div>`;
   const reload = () => router(true);
@@ -775,7 +1132,7 @@ async function viewStudent(id, areaParam) {
   $$('[data-note]').forEach(el => {
     const n = d.notes.find(x => x.id === +el.dataset.note);
     $('.n-edit', el).onclick = () => editNoteModal(n, reload, s.id, areas);
-    $('.n-del', el).onclick = async () => { if (confirmBox('이 관찰기록을 삭제할까요?')) { await api('/api/notes/delete', { id: n.id }); reload(); } };
+    $('.n-del', el).onclick = async () => { const res = await api('/api/notes/delete', { id: n.id }); trashedToast('관찰기록', res); reload(); };
     $('.n-use', el).onchange = async e => { await api('/api/notes/save', { ...n, use_in_draft: e.target.checked }); reload(); };
   });
   $('#d-gen').onclick = () => {
@@ -804,7 +1161,7 @@ async function viewStudent(id, areaParam) {
       if (e.target.classList.contains('v-del')) return;
       text.value = v.content; text.dataset.dirty = '1'; update(); toast('이 버전을 편집기에 불러왔습니다');
     };
-    $('.v-del', el).onclick = async () => { if (confirmBox('이 버전을 삭제할까요?')) { await api('/api/drafts/delete', { id: v.id }); reload(); } };
+    $('.v-del', el).onclick = async () => { const res = await api('/api/drafts/delete', { id: v.id }); trashedToast('초안 버전', res); reload(); };
   });
 }
 
@@ -815,8 +1172,9 @@ const FORBIDDEN = ['토익', 'TOEIC', '토플', 'TOEFL', '텝스', 'TEPS', 'HSK'
 
 async function viewDrafts(classId, areaParam) {
   if (!classId) {
-    if (state.classes.length) { location.replace('#/drafts/' + state.classes[0].id); return; }
-    view.innerHTML = `<div class="empty card"><h2>학급이 없습니다</h2><a href="#/classes">학급 만들기 →</a></div>`;
+    const list = termClasses();
+    if (list.length) { location.replace('#/drafts/' + list[0].id); return; }
+    view.innerHTML = `<div class="empty card">${MASCOT}<h2>${termLabel(state.term)} 학급이 없어요</h2><p>학급을 만들거나 지난 학기 명단을 가져오세요.</p><a class="btn primary" href="#/classes">학급 만들기 →</a></div>`;
     return;
   }
   const [d, settings] = await Promise.all([api('/api/classes/' + classId + (areaParam ? '?area=' + areaParam : '')), api('/api/settings')]);
@@ -877,9 +1235,22 @@ async function viewSettings(section) {
   const s = await api('/api/settings');
   state.settings = s;
   view.innerHTML = `
-    <div class="page-head"><div><h1>설정</h1><div class="muted">모든 데이터는 이 맥의 <a href="#" id="open-data">data 폴더</a>에만 저장됩니다.</div></div></div>
-    <div class="grid grid-2">
-      <div class="card">
+    <div class="page-head"><div><h1>설정</h1><div class="muted">모든 데이터는 이 컴퓨터의 <a href="#" id="open-data">data 폴더</a>에만 저장돼요.</div></div></div>
+    <div class="tabs settings-tabs" role="tablist" aria-label="설정 종류">
+      <button role="tab" data-stab="basic" id="stab-basic" aria-controls="settings-grid">기본</button>
+      <button role="tab" data-stab="adv" id="stab-adv" aria-controls="settings-grid">고급</button></div>
+    <div class="grid grid-2" id="settings-grid">
+      <div class="card" data-pane="basic">
+        <h2>👩‍🏫 선생님</h2>
+        <label class="field"><span>선생님 이름 (대시보드 인사·휴대폰 앱에 표시)</span><input id="teacher_name" value="${esc(s.teacher_name)}" placeholder="예: 김쓰담"></label>
+        <p class="help">학교급·과목·글자 수 같은 작성 기준은 <b>고급</b> 탭에 있어요.</p>
+      </div>
+      <div class="card" data-pane="basic" id="trash-card">
+        <h2>🗑 휴지통</h2>
+        <p class="muted small" style="margin-top:-4px">지운 학급·학생·녹음·관찰기록·초안은 30일 동안 휴지통에 있어요. 실수로 지워도 되살릴 수 있어요.</p>
+        <a class="btn" href="#/trash">휴지통 열기</a>
+      </div>
+      <div class="card" data-pane="adv">
         <h2>AI 사용 방식</h2>
         <label class="check"><input type="radio" name="mode" value="api" ${s.mode === 'api' ? 'checked' : ''}> <b>API 모드</b> — 본인 Gemini API 키로 자동 처리 (권장)</label><br>
         <label class="check" style="margin-top:6px"><input type="radio" name="mode" value="manual" ${s.mode === 'manual' ? 'checked' : ''}> <b>수동 모드</b> — 키 없이, 프롬프트를 Gemini·ChatGPT 웹에 복사해서 사용</label>
@@ -896,12 +1267,11 @@ async function viewSettings(section) {
           <div class="row"><input id="model" value="${esc(s.gemini_model)}" list="model-list"><datalist id="model-list"></datalist></div></label>
         <p class="help">기본값 gemini-2.5-flash. '연결 테스트'를 누르면 쓸 수 있는 모델 목록이 채워집니다. 지정 모델이 없어지면 자동으로 다른 flash 모델로 바뀝니다.</p>
       </div>
-      <div class="card">
+      <div class="card" data-pane="adv">
         <h2>작성 기준</h2>
         <div class="row">
           <label class="field"><span>학교급</span><select id="school_level">${['고등학교', '중학교', '초등학교'].map(x => `<option ${x === s.school_level ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
           <label class="field"><span>기본 과목</span><input id="teacher_subject" value="${esc(s.teacher_subject)}" placeholder="학급에 과목이 없을 때 사용"></label>
-          <label class="field"><span>선생님 이름 (휴대폰 앱에 표시)</span><input id="teacher_name" value="${esc(s.teacher_name)}" placeholder="예: 김인회"></label>
         </div>
         <h3 style="margin-top:14px">영역별 NEIS 바이트 한도</h3>
         <div class="table-wrap"><table><tbody>${s.areas.map(a => `<tr><td>${esc(a.full)}</td>
@@ -913,20 +1283,20 @@ async function viewSettings(section) {
         <label class="field" style="margin-top:12px"><span>내 문체 예시 (예전에 쓴 세특 2~3개 붙여넣기)</span>
           <textarea id="style_examples" rows="6" placeholder="AI가 이 문체를 따라 씁니다. 학생 이름은 지우고 넣으세요.">${esc(s.style_examples)}</textarea></label>
       </div>
-      <div class="card" id="import" style="grid-column:1 / -1">
+      <div class="card" id="import" data-pane="adv" style="grid-column:1 / -1">
         <div class="section-title"><h2>아이폰 기록 가져오기</h2>
           <label class="check"><input type="checkbox" id="auto_process" ${s.auto_process === '1' ? 'checked' : ''}> 들어오면 자동으로 처리 (API 모드: 전사→분리 / 키 없음: 이름 기준 분리)</label></div>
         <p class="help" style="margin-top:-4px">한 수업에 여러 학생을 한 번에 녹음해도 됩니다. 파일을 학생별로 나누거나 이름을 붙일 필요가 없습니다 — 이름이 언급된 곳을 기준으로 자동으로 나눕니다. 학급은 아래 <b>시간표</b>로 녹음 시각에 맞춰 자동 지정됩니다.</p>
         <div id="src-box"><p class="muted">불러오는 중…</p></div>
       </div>
-      <div class="card" style="grid-column:1 / -1">
+      <div class="card" data-pane="adv" style="grid-column:1 / -1">
         <div class="section-title"><h2>시간표 (녹음 시각 → 학급 자동 지정)</h2><span class="muted small">수업 시간 중이나 끝난 뒤 15분 안의 녹음·메모는 그 시간 학급으로 들어갑니다</span></div>
         <div class="split" style="grid-template-columns: 180px 1fr">
           <label class="field"><span>교시 시간 (한 줄에 하나)</span><textarea id="period_times" rows="9" style="font-variant-numeric:tabular-nums">${esc(s.period_times)}</textarea></label>
           <div id="tt-box" style="overflow:auto"></div>
         </div>
       </div>
-      <div class="card" style="grid-column:1 / -1" id="stt">
+      <div class="card" style="grid-column:1 / -1" id="stt" data-pane="basic">
         <div class="section-title"><h2>받아쓰기(음성 → 글자) 엔진</h2><span id="stt-active" class="small"></span></div>
         <div class="row" style="gap:18px;align-items:center">
           <label class="check shrink"><input type="radio" name="stt_engine" value="whisper" ${s.stt_engine !== 'gemini' ? 'checked' : ''}> <b>내 맥에서 (Whisper)</b> — 권장 · 녹음이 외부로 나가지 않음 · 무료</label>
@@ -935,7 +1305,7 @@ async function viewSettings(section) {
         <p class="help"><b>Whisper</b>는 오픈AI가 공개한 음성 인식 모델을 이 맥에서 직접 돌립니다. 인터넷·API 키·비용이 없고 <b>녹음이 맥 밖으로 나가지 않아</b> 학생 개인정보에 가장 안전합니다. 처음 한 번 모델을 내려받으세요.</p>
         <div id="wh-box" style="margin-top:10px"><p class="muted">확인 중…</p></div>
       </div>
-      <div class="card" style="grid-column:1 / -1" id="google">
+      <div class="card" style="grid-column:1 / -1" id="google" data-pane="adv">
         <div class="section-title"><h2>구글시트 자동 반영 · 구글 드라이브 백업</h2><span id="g-status" class="small"></span></div>
         <p class="help" style="margin-top:-4px">한 번 연결해 두면 <b>기록이 바뀔 때마다 5분 안에 구글시트에 자동 반영</b>되고, <b>하루 한 번 전체 기록이 구글 드라이브에 백업</b>됩니다. 직접 파일을 올리거나 덮어쓸 일이 없습니다. (시트는 보기용 사본 — 수정은 쓰담에서)</p>
         <div class="split">
@@ -957,17 +1327,18 @@ async function viewSettings(section) {
           </div>
         </div>
       </div>
-      <div class="card" style="grid-column:1 / -1" id="phone">
+      <div class="card" style="grid-column:1 / -1" id="phone" data-pane="basic">
         <div class="section-title"><h2>📱 휴대폰 '쓰담' 앱 연결</h2><label class="check"><input type="checkbox" id="drive_inbox" ${s.drive_inbox === '1' ? 'checked' : ''}> 휴대폰 녹음 자동으로 가져오기</label></div>
         <div class="split">
           <div class="info-box"><b>아이폰</b> — App Store에서 <b>쓰담</b> 설치 → 녹음하면 <b>iCloud로 자동 연동</b> (같은 Apple ID면 설정 없음)${s.platform === 'win' ? '<br><span class="small muted">윈도우 PC는 iCloud for Windows가 설치돼 있어야 합니다. 없으면 아래 구글 연결을 쓰세요.</span>' : ''}
             <br><br><b>안드로이드(갤럭시) · 아이폰 공통</b> — Play 스토어/App Store에서 <b>쓰담</b> 설치 → 앱의 <b>컴퓨터 연결</b> → 오른쪽 QR 찍기 → 녹음이 <b>내 구글 드라이브</b>를 거쳐 이 컴퓨터로 자동 전송
-            <p class="small muted" style="margin:6px 0 0">QR에는 '녹음 올리기'만 가능한 전용 열쇠가 들어 있습니다. 휴대폰을 잃어버려도 기록을 볼 수는 없습니다. 구글 연결(위 카드)이 먼저 되어 있어야 합니다.</p></div>
+            <p class="small muted" style="margin:6px 0 0">QR에는 '녹음 올리기'만 가능한 전용 열쇠가 들어 있습니다. 휴대폰을 잃어버려도 기록을 볼 수는 없습니다. <b>고급 → 구글 연동</b>이 먼저 되어 있어야 합니다.</p></div>
           <div style="text-align:center"><div id="qr-box" class="muted small">불러오는 중…</div>
             <button class="sm" id="phone-scan" style="margin-top:8px">휴대폰 녹음 지금 가져오기</button></div>
         </div>
+        <div class="source" id="ts-box" style="margin-top:14px"></div>
       </div>
-      <div class="card" style="grid-column:1 / -1" id="backup-card">
+      <div class="card" style="grid-column:1 / -1" id="backup-card" data-pane="basic">
         <div class="section-title"><h2>백업 · 복원 · 엑셀</h2>
           <span style="display:flex;gap:6px;flex-wrap:wrap"><button id="backup">지금 백업 (이 맥)</button><button id="xlsx-all" class="primary">전체 엑셀로 저장</button></span></div>
         <p class="help" style="margin-top:-4px">이 맥에는 매일 자동 백업(30일)됩니다. 구글 드라이브 백업까지 켜 두면 맥이 고장 나도 복원할 수 있습니다. 녹음 원본(오디오)은 용량 때문에 이 맥에만 보관되니, 타임머신 백업을 함께 쓰면 가장 안전합니다.</p>
@@ -977,12 +1348,14 @@ async function viewSettings(section) {
             <input type="file" id="restore-file" accept=".zip,.db"></div>
         </div>
       </div>
-      <div class="card">
-        <h2>프로그램 업데이트</h2>
-        <p class="muted small" id="upd-info">현재 버전 확인 중…</p>
-        <div class="row"><button class="shrink" id="upd-check">업데이트 확인</button>
-          <label class="check"><input type="checkbox" id="update_check" ${s.update_check === '1' ? 'checked' : ''}> 실행할 때 자동으로 새 버전 확인</label></div>
-        <p class="help">업데이트는 프로그램 코드만 바꾸며 학생 기록은 그대로 유지됩니다. 업데이트 직전에 자동 백업합니다.</p>
+      <div class="card" data-pane="basic" style="grid-column:1 / -1" id="update-card">
+        <div class="section-title"><h2>✨ 프로그램 업데이트</h2>
+          <label class="switch"><input type="checkbox" id="auto_update" ${s.auto_update !== '0' ? 'checked' : ''}> 자동으로 업데이트</label></div>
+        <p class="muted small" style="margin-top:-4px">새 버전이 나오면 쉬는 틈에 알아서 바꿔요. 학생 기록은 그대로예요.</p>
+        <p class="small" id="upd-info">현재 버전 확인 중…</p>
+        <div class="row"><button class="shrink" id="upd-check">지금 확인</button>
+          <label class="check"><input type="checkbox" id="update_check" ${s.update_check === '1' ? 'checked' : ''}> 새 버전이 있으면 화면 위에 알려 주기</label></div>
+        <p class="help">자동 업데이트는 20분 동안 아무 조작이 없고, AI 작업·모델 내려받기가 없을 때만 해요. 바꾸기 직전에 기록을 자동 백업해요.</p>
       </div>
     </div>
     <div style="position:sticky;bottom:0;padding:14px 0;background:linear-gradient(transparent, var(--bg) 30%);display:flex;justify-content:flex-end">
@@ -1001,6 +1374,7 @@ async function viewSettings(section) {
     period_times: $('#period_times').value, timetable: JSON.stringify(timetable),
     update_check: $('#update_check').checked ? '1' : '0',
     drive_inbox: $('#drive_inbox').checked ? '1' : '0', teacher_name: $('#teacher_name').value.trim(),
+    auto_update: $('#auto_update').checked ? '1' : '0',
   });
   const save = async () => { await api('/api/settings', collect()); };
   $('#save').onclick = async () => { await save(); toast('설정을 저장했습니다'); updateModeBadge(); router(true); };
@@ -1045,8 +1419,10 @@ async function viewSettings(section) {
   const drawTT = () => {
     const periods = $('#period_times').value.split('\n').filter(l => l.trim());
     const days = ['월', '화', '수', '목', '금'];
-    const opts = sel => '<option value="">-</option>' + state.classes.map(c => `<option value="${c.id}" ${String(c.id) === String(sel) ? 'selected' : ''}>${esc(c.grade + '-' + c.class_no + (c.subject ? ' ' + c.subject : ''))}</option>`).join('');
-    $('#tt-box').innerHTML = state.classes.length ? `<table class="tt"><thead><tr><th>교시</th>${days.map(d => `<th>${d}</th>`).join('')}</tr></thead><tbody>
+    const setIds = new Set(Object.values(timetable).map(String));
+    const ttClasses = state.classes.filter(c => inTerm(c, currentTerm()) || inTerm(c) || setIds.has(String(c.id)));
+    const opts = sel => '<option value="">-</option>' + ttClasses.map(c => `<option value="${c.id}" ${String(c.id) === String(sel) ? 'selected' : ''}>${esc(c.grade + '-' + c.class_no + (c.subject ? ' ' + c.subject : ''))}</option>`).join('');
+    $('#tt-box').innerHTML = ttClasses.length ? `<table class="tt"><thead><tr><th>교시</th>${days.map(d => `<th>${d}</th>`).join('')}</tr></thead><tbody>
       ${periods.map((p, i) => `<tr><th>${i + 1}<div class="muted" style="font-weight:400">${esc(p.trim())}</div></th>
         ${days.map((d, j) => { const k = `${j + 1}-${i + 1}`; return `<td class="${timetable[k] ? 'set' : ''}"><select data-k="${k}">${opts(timetable[k])}</select></td>`; }).join('')}</tr>`).join('')}
       </tbody></table><p class="help">바꾼 뒤 아래 <b>설정 저장</b>을 누르세요.</p>` : '<p class="muted">먼저 학급을 만들어야 시간표를 채울 수 있습니다.</p>';
@@ -1058,13 +1434,26 @@ async function viewSettings(section) {
   drawTT();
   $('#period_times').addEventListener('change', drawTT);
 
+  // 기본 / 고급 탭
+  const showTab = tab => {
+    $$('[data-stab]').forEach(b => { const on = b.dataset.stab === tab; b.classList.toggle('on', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
+    $$('#settings-grid > [data-pane]').forEach(c => c.classList.toggle('hidden', c.dataset.pane !== tab));
+    store('local', 'sseudam.settingsTab', tab);
+  };
+  $$('[data-stab]').forEach(b => b.onclick = () => showTab(b.dataset.stab));
+  const target = section && $('#' + section);
+  showTab(target && target.dataset.pane ? target.dataset.pane : (store('local', 'sseudam.settingsTab') === 'adv' ? 'adv' : 'basic'));
+  $('#auto_update').onchange = async e => { await api('/api/settings', { auto_update: e.target.checked ? '1' : '0' }); toast(e.target.checked ? '자동 업데이트를 켰어요' : '자동 업데이트를 껐어요'); };
+  renderTextSync();
+
   // 가져오기 경로
-  renderSources().then(() => { if (section && $('#' + section)) $('#' + section).scrollIntoView({ behavior: 'smooth' }); });
+  renderSources().then(() => { if (target) target.scrollIntoView({ behavior: 'smooth' }); });
 
   // 업데이트
   const showUpd = async force => {
     const v = await api('/api/version');
     let txt = `현재 버전 <b>${esc(v.version)}</b>`;
+    if (v.auto && v.auto.pending) txt += ` · <span class="muted">자동 업데이트: ${esc(v.auto.state)}</span>`;
     if (!v.repo) { $('#upd-info').innerHTML = txt + ' · 업데이트 저장소가 지정되지 않았습니다.'; return; }
     const u = await api('/api/update/check' + (force ? '?force=1' : ''), undefined, { silent: true }).catch(e => ({ error: e.message }));
     if (u.available) txt += ` · <b class="ok-text">새 버전 ${esc(u.latest)} 있음</b> <button class="sm primary" id="upd-go">지금 업데이트</button>`;
@@ -1081,7 +1470,7 @@ async function viewSettings(section) {
 async function renderPairing() {
   const box = $('#qr-box'); if (!box) return;
   const p = await api('/api/phone/pairing', undefined, { silent: true }).catch(() => null);
-  if (!p || !p.ready) { box.innerHTML = '<div class="warn" style="text-align:left">먼저 위의 <b>구글시트 자동 반영 · 드라이브 백업</b>을 연결하세요. 연결하면 여기에 QR이 나타납니다.</div>'; return; }
+  if (!p || !p.ready) { box.innerHTML = '<div class="warn" style="text-align:left">먼저 <b>고급 → 구글시트 자동 반영 · 드라이브 백업</b>을 연결하세요. 연결하면 여기에 QR이 나타나요.</div>'; return; }
   const qr = qrcode(0, 'M'); qr.addData(p.payload); qr.make();
   box.innerHTML = `<div style="background:#fff;display:inline-block;padding:10px;border-radius:10px">${qr.createSvgTag({ cellSize: 5, margin: 2 })}</div>
     <div class="small muted" style="margin-top:6px">휴대폰 '쓰담' 앱 → 컴퓨터 연결 → QR 찍기</div>`;
@@ -1210,7 +1599,6 @@ async function renderSources() {
         <li>사용 팁: 메모 제목에 <b>2-3</b> 같은 학급을 쓰거나, 시간표를 채워 두면 학급이 자동 지정됩니다</li></ol></details>
     </div>
 ` : '<p class="muted small">아이폰 음성메모·메모 앱 자동 가져오기는 맥에서만 됩니다. 윈도우에서는 휴대폰 \'쓰담\' 앱(아래)이나 iCloud 폴더를 쓰세요.</p>') + `
-    <div class="source" id="ts-box"></div>
     <div class="source">
       <div class="source-head"><h3>AirDrop · 퀵 셰어로 받기 <span class="badge blue">맥·윈도우</span> ${src.downloads.enabled ? '<span class="badge green">작동 중</span>' : ''}</h3>
         <label class="switch"><input type="checkbox" id="dl-on" ${src.downloads.enabled ? 'checked' : ''}> 사용</label></div>
@@ -1228,7 +1616,6 @@ async function renderSources() {
     if ($('#vm-on').checked && r.access === 'no_permission') toast('전체 디스크 접근 권한이 필요합니다. 안내를 따라 주세요.', true);
     renderSources();
   };
-  renderTextSync();
   $('#dl-on').onchange = async e => { await api('/api/settings', { downloads_import: e.target.checked ? '1' : '0', downloads_since: '' }); renderSources(); };
   if (!mac) { $('#inbox-open').onclick = async () => { await api('/api/inbox/create', {}); renderSources(); }; return; }
   $('#vm-on').onchange = () => setVM();
@@ -1264,8 +1651,18 @@ async function runUpdate(u) {
 
 async function checkUpdateBanner() {
   try {
-    const v = await api('/api/version', undefined, { silent: true });
+    const v = await api('/api/version?notice=1', undefined, { silent: true });
     $('#ver-badge').textContent = 'v' + v.version;
+    if (v.just_updated) {
+      const j = v.just_updated, b0 = $('#update-banner');
+      b0.innerHTML = `<b>${j.app ? '쓰담 앱이 새 버전으로 바뀌었어요 ✨' : `쓰담이 ${esc(j.from)} → ${esc(j.to)}으로 업데이트됐어요 ✨`}</b>
+        ${j.url ? `<a href="${esc(j.url)}" target="_blank" rel="noopener">무엇이 바뀌었나요?</a>` : ''} <button class="sm ghost" id="ub-x">닫기</button>
+        ${j.notes ? `<div class="notes">${esc(j.notes)}</div>` : ''}`;
+      b0.classList.remove('hidden');
+      $('#ub-x').onclick = () => b0.classList.add('hidden');
+      toast(j.app ? '새 버전으로 업데이트됐어요 ✨' : `새 버전 ${j.to}으로 업데이트됐어요 ✨`);
+      return;
+    }
     const u = await api('/api/update/check', undefined, { silent: true });
     const b = $('#update-banner');
     if (v.shell_outdated && !u.available) {
@@ -1318,14 +1715,14 @@ async function maybeOnboard() {
 }
 
 function showOnboarding(s) {
-  const y = new Date().getFullYear(), sem = (new Date().getMonth() + 1) >= 8 ? 2 : 1;
+  const { year: y, semester: sem } = currentTerm();
   const st = { step: 1 };
   const steps = {
     1: () => `<h2>👋 쓰담에 오신 것을 환영합니다</h2><p style="margin:-4px 0 8px;color:var(--accent);font-weight:600">말로 담고, 글로 씁니다</p>
       <p class="muted">수업·상담 중 말로 남긴 관찰을 학생별로 모아, 학기말 세특·행동특성·창체 초안을 빠르게 만드는 도구입니다. 1분이면 준비됩니다.</p>
       <div class="row" style="margin-top:12px">
         <label class="field"><span>학교급</span><select id="ob-level">${['고등학교', '중학교', '초등학교'].map(x => `<option ${x === s.school_level ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
-        <label class="field"><span>선생님 이름 (선택)</span><input id="ob-name" value="${esc(s.teacher_name || '')}" placeholder="예: 김인회"></label>
+        <label class="field"><span>선생님 이름 (선택)</span><input id="ob-name" value="${esc(s.teacher_name || '')}" placeholder="예: 김쓰담"></label>
       </div>`,
     2: () => `<h2>어떤 기록을 쓰시나요?</h2><p class="muted">해당하는 것을 모두 고르세요. 학급이 자동으로 만들어집니다. (나중에 학급·학생 메뉴에서 더 추가 가능)</p>
       <div class="source"><label class="check"><input type="checkbox" id="ob-subj-on" checked> <b>교과 세특</b> — 수업하는 반</label>
@@ -1409,6 +1806,7 @@ async function updatePending() {
 
 $('#btn-quit').onclick = async () => {
   if (!confirmBox('쓰담을 종료할까요? (진행 중인 AI 작업은 중단됩니다)')) return;
+  quitting = true;
   try { await api('/api/shutdown', {}); } catch (e) { /* */ }
   document.body.innerHTML = '<div class="empty"><h2>종료했습니다</h2><p>이 창을 닫아도 됩니다. 다시 쓰려면 "쓰담 시작"을 실행하세요.</p></div>';
 };
