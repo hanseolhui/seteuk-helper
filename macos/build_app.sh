@@ -50,9 +50,32 @@ for s in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
-# 4) 서명 (기본 ad-hoc, 개발자 인증서가 있으면 SIGN_ID 지정)
-codesign --force --sign "${SIGN_ID:--}" "$APP/Contents/Resources/bin/whisper-cli"
-codesign --force --sign "${SIGN_ID:--}" "$APP"
+# 4) 서명: Developer ID 인증서가 있으면 자동 사용(+ 공증), 없으면 ad-hoc
+if [ -z "${SIGN_ID:-}" ]; then
+  SIGN_ID=$(security find-identity -v -p codesigning | awk '/Developer ID Application/ {print $2; exit}')
+fi
+NOTARY_PROFILE="${NOTARY_PROFILE:-notary}"
+if [ -n "$SIGN_ID" ]; then
+  echo "서명: Developer ID ($SIGN_ID)"
+  SIGN=(codesign --force --timestamp --options runtime --sign "$SIGN_ID")
+else
+  echo "서명: ad-hoc (Developer ID 없음)"
+  SIGN=(codesign --force --sign -)
+fi
+"${SIGN[@]}" "$APP/Contents/Resources/bin/whisper-cli"
+"${SIGN[@]}" "$APP"
+codesign --verify --strict "$APP"
+
+notarize() {  # $1 = 공증할 파일(.zip/.dmg)
+  [ -n "$SIGN_ID" ] && [ "${SKIP_NOTARIZE:-0}" != "1" ] || return 0
+  echo "애플 공증 제출: $(basename "$1") …"
+  xcrun notarytool submit "$1" --keychain-profile "$NOTARY_PROFILE" --wait --timeout 30m | tail -3
+}
+if [ -n "$SIGN_ID" ] && [ "${SKIP_NOTARIZE:-0}" != "1" ]; then
+  ditto -c -k --keepParent "$APP" "$BUILD/notarize-app.zip"
+  notarize "$BUILD/notarize-app.zip"
+  xcrun stapler staple "$APP"
+fi
 
 # 5) 배포 파일
 ditto -c -k --norsrc --keepParent "$APP" "$DIST/SeteukHelper-mac.zip"          # install.sh 용
@@ -62,6 +85,10 @@ STAGE="$BUILD/dmg"; mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"; ln -s /Applications "$STAGE/Applications"
 cp 사용설명서.md 프롬프트_모음.md "$STAGE/" 2>/dev/null || true
 hdiutil create -quiet -volname "세특도우미 $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DIST/SeteukHelper.dmg"
+if [ -n "$SIGN_ID" ]; then
+  codesign --force --timestamp --sign "$SIGN_ID" "$DIST/SeteukHelper.dmg"
+  notarize "$DIST/SeteukHelper.dmg" && [ "${SKIP_NOTARIZE:-0}" != "1" ] && xcrun stapler staple "$DIST/SeteukHelper.dmg"
+fi
 
 # 6) 아이폰 단축어 (이 맥이 iCloud에 로그인돼 있어야 서명됨 — 실패해도 빌드는 계속)
 if python3 tools/build_shortcuts.py; then

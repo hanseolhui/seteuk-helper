@@ -73,16 +73,19 @@ def build_prompt(op, params):
             s = db.row(conn, "SELECT * FROM students WHERE id=?", (params["student_id"],))
             if not s:
                 raise ValueError("학생을 찾을 수 없습니다.")
-            notes = db.rows(conn, "SELECT * FROM notes WHERE student_id=? AND use_in_draft=1 "
-                                  "ORDER BY date, id", (s["id"],))
-            if not notes:
-                raise ValueError("%s 학생의 관찰기록이 없습니다." % s["name"])
             c = _class_info(conn, s["class_id"])
-            return {"prompt": prompts.draft(s, c, notes, settings, params.get("extra", "")),
+            kind = c.get("kind") or "교과"
+            area = params.get("area") or db.areas_for_kind(kind)[0]["id"]
+            notes = [n for n in db.rows(conn, "SELECT * FROM notes WHERE student_id=? AND use_in_draft=1 "
+                                              "ORDER BY date, id", (s["id"],))
+                     if db.note_area(n, kind) == area]
+            if not notes:
+                raise ValueError("%s 학생의 '%s' 관찰기록이 없습니다." % (s["name"], db.area_name(area)))
+            return {"prompt": prompts.draft(s, c, notes, settings, params.get("extra", ""), area),
                     "system": prompts.DRAFT_SYSTEM}
         if op == "shorten":
             text = params.get("text", "")
-            limit = int(settings.get("byte_limit") or 1500)
+            limit = db.area_limit(params.get("area") or "subject", settings)
             return {"prompt": prompts.shorten(text, limit, db.neis_bytes(text)),
                     "system": prompts.DRAFT_SYSTEM}
         raise ValueError("알 수 없는 작업: %s" % op)
@@ -98,7 +101,7 @@ def apply(op, params, text):
     if op == "segment":
         return apply_segment(params["recording_id"], text)
     if op in ("draft", "shorten"):
-        return apply_draft(params["student_id"], text)
+        return apply_draft(params["student_id"], text, params.get("area") or "subject")
     raise ValueError("알 수 없는 작업: %s" % op)
 
 
@@ -165,14 +168,14 @@ def apply_segment(rid, text):
         conn.close()
 
 
-def apply_draft(student_id, text):
+def apply_draft(student_id, text, area="subject"):
     text = (text or "").strip().strip('"').strip()
     text = re.sub(r"^```\w*\s*|\s*```$", "", text).strip()
     if not text:
         raise ValueError("초안이 비어 있습니다.")
     conn = db.connect()
-    conn.execute("INSERT INTO drafts(student_id, content, bytes) VALUES (?,?,?)",
-                 (student_id, text, db.neis_bytes(text)))
+    conn.execute("INSERT INTO drafts(student_id, content, bytes, area) VALUES (?,?,?,?)",
+                 (student_id, text, db.neis_bytes(text), area))
     conn.commit()
     conn.close()
     return {"ok": True, "bytes": db.neis_bytes(text)}

@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import db  # noqa: E402
 import gemini  # noqa: E402
 import pipeline  # noqa: E402
+import platform_util  # noqa: E402
 import prompts  # noqa: E402
 import sheets  # noqa: E402
 import update  # noqa: E402
@@ -58,8 +59,7 @@ def _int(v, default=None):
 
 
 def open_in_finder(path, reveal=False):
-    if sys.platform == "darwin":
-        subprocess.Popen(["open", "-R", path] if reveal else ["open", path])
+    platform_util.open_path(path, reveal)
 
 
 # ───────────────────────── 대시보드 ─────────────────────────
@@ -143,17 +143,20 @@ def classes_list(h, q, body):
 
 @route("POST", "/api/classes/save")
 def classes_save(h, q, b):
+    kind = b.get("kind") if b.get("kind") in db.CLASS_KINDS else "교과"
     vals = (_int(b.get("year"), datetime.date.today().year), _int(b.get("semester"), 1),
-            _int(b.get("grade")), _int(b.get("class_no")), (b.get("subject") or "").strip())
-    if not vals[2] or not vals[3]:
+            _int(b.get("grade")), _int(b.get("class_no")), (b.get("subject") or "").strip(), kind)
+    if kind in ("교과", "담임") and (not vals[2] or not vals[3]):
         raise ApiError("학년과 반을 입력하세요.")
+    if kind in ("동아리", "기타") and not vals[4]:
+        raise ApiError("%s 이름을 입력하세요." % ("동아리" if kind == "동아리" else "모둠"))
     conn = db.connect()
     if b.get("id"):
-        conn.execute("UPDATE classes SET year=?, semester=?, grade=?, class_no=?, subject=? WHERE id=?",
+        conn.execute("UPDATE classes SET year=?, semester=?, grade=?, class_no=?, subject=?, kind=? WHERE id=?",
                      vals + (int(b["id"]),))
         cid = int(b["id"])
     else:
-        cid = conn.execute("INSERT INTO classes(year, semester, grade, class_no, subject) VALUES (?,?,?,?,?)",
+        cid = conn.execute("INSERT INTO classes(year, semester, grade, class_no, subject, kind) VALUES (?,?,?,?,?,?)",
                            vals).lastrowid
     conn.commit()
     conn.close()
@@ -177,14 +180,24 @@ def class_detail(h, q, b, cid):
         if not c:
             raise ApiError("학급이 없습니다.", 404)
         c["label"] = db.class_label(c)
+        kind = c.get("kind") or "교과"
+        areas = db.areas_for_kind(kind)
+        area = q.get("area") if q.get("area") in [a["id"] for a in areas] else areas[0]["id"]
+        settings = db.get_settings(conn)
         students = db.rows(conn, """
-            SELECT s.*, (SELECT COUNT(*) FROM notes n WHERE n.student_id=s.id) AS notes,
-                   (SELECT MAX(date) FROM notes n WHERE n.student_id=s.id) AS last_date,
-                   (SELECT status FROM drafts d WHERE d.student_id=s.id ORDER BY (status='확정') DESC, id DESC LIMIT 1) AS draft_status,
-                   (SELECT bytes FROM drafts d WHERE d.student_id=s.id ORDER BY (status='확정') DESC, id DESC LIMIT 1) AS draft_bytes,
-                   (SELECT content FROM drafts d WHERE d.student_id=s.id ORDER BY (status='확정') DESC, id DESC LIMIT 1) AS draft
+            SELECT s.*, (SELECT MAX(date) FROM notes n WHERE n.student_id=s.id) AS last_date
             FROM students s WHERE s.class_id=? ORDER BY s.number, s.name""", (int(cid),))
-        return {"class": c, "students": students, "byte_limit": int(db.get_settings(conn)["byte_limit"] or 1500)}
+        for st in students:
+            notes = db.rows(conn, "SELECT area FROM notes WHERE student_id=?", (st["id"],))
+            st["notes"] = len(notes)
+            st["area_notes"] = sum(1 for n in notes if db.note_area(n, kind) == area)
+            d = db.row(conn, "SELECT status, bytes, content FROM drafts WHERE student_id=? AND area=? "
+                             "ORDER BY (status='확정') DESC, id DESC LIMIT 1", (st["id"], area))
+            st["draft_status"] = d["status"] if d else None
+            st["draft_bytes"] = d["bytes"] if d else None
+            st["draft"] = d["content"] if d else None
+        return {"class": c, "students": students, "areas": areas, "area": area,
+                "byte_limit": db.area_limit(area, settings)}
     finally:
         conn.close()
 
@@ -203,7 +216,7 @@ def parse_roster(text):
         num, name = None, None
         for cell in cells:
             cell = cell.strip()
-            m = re.fullmatch(r"(\d{1,3})\s*번?", cell)
+            m = re.fullmatch(r"(\d{1,5})\s*번?", cell)  # 번호 또는 학번(20315)
             if m and num is None:
                 num = int(m.group(1))
             elif re.fullmatch(r"[가-힣A-Za-z·\s]{2,20}", cell) and name is None:
@@ -282,8 +295,13 @@ def student_detail(h, q, b, sid):
             d["forbidden"] = prompts.check_forbidden(d["content"])
         siblings = db.rows(conn, "SELECT id, number, name FROM students WHERE class_id=? ORDER BY number, name",
                            (s["class_id"],))
+        kind = c.get("kind") or "교과"
+        settings = db.get_settings(conn)
+        areas = [dict(a, limit=db.area_limit(a["id"], settings)) for a in db.areas_for_kind(kind)]
+        for n in notes:
+            n["area_eff"] = db.note_area(n, kind)
         return {"student": s, "class": c, "notes": notes, "drafts": drafts, "siblings": siblings,
-                "byte_limit": int(db.get_settings(conn)["byte_limit"] or 1500)}
+                "areas": areas, "byte_limit": areas[0]["limit"]}
     finally:
         conn.close()
 
@@ -298,15 +316,16 @@ def notes_save(h, q, b):
     conn = db.connect()
     if b.get("id"):
         conn.execute("UPDATE notes SET student_id=COALESCE(?, student_id), date=?, kind=?, category=?, content=?, "
-                     "use_in_draft=? WHERE id=?",
+                     "use_in_draft=?, area=? WHERE id=?",
                      (_int(b.get("student_id")), b.get("date") or datetime.date.today().isoformat(),
                       b.get("kind") or "수업", b.get("category") or "", content,
-                      1 if b.get("use_in_draft", True) else 0, int(b["id"])))
+                      1 if b.get("use_in_draft", True) else 0, b.get("area") or "", int(b["id"])))
     else:
-        conn.execute("INSERT INTO notes(student_id, date, kind, category, content, recording_id, use_in_draft) "
-                     "VALUES (?,?,?,?,?,?,1)",
+        conn.execute("INSERT INTO notes(student_id, date, kind, category, content, recording_id, use_in_draft, area) "
+                     "VALUES (?,?,?,?,?,?,1,?)",
                      (int(b["student_id"]), b.get("date") or datetime.date.today().isoformat(),
-                      b.get("kind") or "수업", b.get("category") or "", content, _int(b.get("recording_id"))))
+                      b.get("kind") or "수업", b.get("category") or "", content, _int(b.get("recording_id")),
+                      b.get("area") or ""))
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -355,7 +374,12 @@ def recording_detail(h, q, b, rid):
         unmatched = db.rows(conn, "SELECT * FROM unmatched WHERE recording_id=? ORDER BY id", (int(rid),))
         students = db.rows(conn, "SELECT id, number, name FROM students WHERE class_id=? ORDER BY number, name",
                            (r["class_id"],)) if r["class_id"] else []
-        return {"recording": r, "notes": notes, "unmatched": unmatched, "students": students}
+        c = db.row(conn, "SELECT kind FROM classes WHERE id=?", (r["class_id"],)) if r["class_id"] else None
+        kind = (c or {}).get("kind") or "교과"
+        for n in notes:
+            n["area_eff"] = db.note_area(n, kind)
+        return {"recording": r, "notes": notes, "unmatched": unmatched, "students": students,
+                "areas": db.areas_for_kind(kind)}
     finally:
         conn.close()
 
@@ -529,14 +553,23 @@ def drafts_batch(h, q, b):
     if not settings.get("gemini_api_key"):
         raise ApiError("Gemini API 키가 없습니다.")
     conn = db.connect()
-    students = db.rows(conn, """SELECT s.id, s.name, s.number FROM students s WHERE s.class_id=?
-                  AND EXISTS (SELECT 1 FROM notes n WHERE n.student_id=s.id AND n.use_in_draft=1)
-                  %s ORDER BY s.number""" % ("AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.student_id=s.id)"
-                                             if b.get("only_missing") else ""), (int(b["class_id"]),))
+    c = db.row(conn, "SELECT * FROM classes WHERE id=?", (int(b["class_id"]),))
+    kind = c.get("kind") or "교과"
+    area = b.get("area") or db.areas_for_kind(kind)[0]["id"]
+    students = db.rows(conn, "SELECT id, name, number FROM students WHERE class_id=? ORDER BY number", (c["id"],))
+    targets = []
+    for st in students:
+        notes = db.rows(conn, "SELECT area FROM notes WHERE student_id=? AND use_in_draft=1", (st["id"],))
+        if not any(db.note_area(n, kind) == area for n in notes):
+            continue
+        if b.get("only_missing") and db.row(conn, "SELECT id FROM drafts WHERE student_id=? AND area=?", (st["id"], area)):
+            continue
+        targets.append(st)
     conn.close()
-    for s in students:
-        pipeline.enqueue("draft", {"student_id": s["id"]}, "세특 초안 %s번 %s" % (s["number"], s["name"]))
-    return {"ok": True, "count": len(students)}
+    for st in targets:
+        pipeline.enqueue("draft", {"student_id": st["id"], "area": area},
+                         "%s 초안 %s번 %s" % (db.area_name(area), st["number"], st["name"]))
+    return {"ok": True, "count": len(targets)}
 
 
 @route("GET", "/api/jobs")
@@ -576,14 +609,16 @@ def drafts_save(h, q, b):
         raise ApiError("내용이 비어 있습니다.")
     conn = db.connect()
     status = b.get("status") or "초안"
+    area = b.get("area") or "subject"
     if status == "확정":
-        conn.execute("UPDATE drafts SET status='초안' WHERE student_id=? AND status='확정'", (int(b["student_id"]),))
+        conn.execute("UPDATE drafts SET status='초안' WHERE student_id=? AND area=? AND status='확정'",
+                     (int(b["student_id"]), area))
     if b.get("id") and not b.get("as_new"):
         conn.execute("UPDATE drafts SET content=?, bytes=?, status=? WHERE id=?",
                      (content, db.neis_bytes(content), status, int(b["id"])))
     else:
-        conn.execute("INSERT INTO drafts(student_id, content, bytes, status) VALUES (?,?,?,?)",
-                     (int(b["student_id"]), content, db.neis_bytes(content), status))
+        conn.execute("INSERT INTO drafts(student_id, content, bytes, status, area) VALUES (?,?,?,?,?)",
+                     (int(b["student_id"]), content, db.neis_bytes(content), status, area))
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -611,6 +646,9 @@ def settings_get(h, q, b):
     s["has_key"] = bool(s.get("gemini_api_key"))
     s.pop("gemini_api_key", None)
     s["inbox_exists"] = os.path.isdir(os.path.expanduser(s.get("inbox_dir") or ""))
+    s["areas"] = [dict(a, limit=db.area_limit(a["id"], s)) for a in db.AREAS]
+    s["class_kinds"] = db.CLASS_KINDS
+    s["platform"] = "mac" if platform_util.IS_MAC else ("win" if platform_util.IS_WIN else "other")
     s["data_dir"] = db.DATA_DIR
     return s
 
@@ -680,10 +718,11 @@ def backup_now(h, q, b):
 @route("GET", "/api/export/table")
 def export_table(h, q, b):
     conn = db.connect()
-    label, rows = sheets.class_table(conn, int(q["class_id"]))
+    label, header, rows = sheets.class_table(conn, int(q["class_id"]))
     conn.close()
-    return {"label": label, "header": sheets.HEADER, "rows": rows,
-            "tsv": sheets.to_tsv(sheets.HEADER[:6], [r[:6] for r in rows])}
+    keep = [i for i, h in enumerate(header) if h != "관찰기록 요약"]
+    return {"label": label, "header": header, "rows": rows,
+            "tsv": sheets.to_tsv([header[i] for i in keep], [[r[i] for i in keep] for r in rows])}
 
 
 @route("POST", "/api/export/xlsx")
@@ -696,11 +735,11 @@ def export_xlsx(h, q, b):
 @route("POST", "/api/export/csv")
 def export_csv(h, q, b):
     conn = db.connect()
-    label, rows = sheets.class_table(conn, int(b["class_id"]))
+    label, header, rows = sheets.class_table(conn, int(b["class_id"]))
     conn.close()
-    path = os.path.join(os.path.expanduser("~/Downloads"), "세특_%s_%s.csv" % (label, datetime.date.today().isoformat()))
+    path = os.path.join(platform_util.downloads_dir(), "세특_%s_%s.csv" % (label, datetime.date.today().isoformat()))
     with open(path, "w", encoding="utf-8") as f:
-        f.write(sheets.to_csv(sheets.HEADER, rows))
+        f.write(sheets.to_csv(header, rows))
     open_in_finder(path, reveal=True)
     return {"ok": True, "path": path, "name": os.path.basename(path)}
 
@@ -714,6 +753,31 @@ def ensure_token():
         db.set_settings({"sheets_token": secrets.token_urlsafe(18)})
         s = db.get_settings()
     return s["sheets_token"]
+
+
+def ensure_upload_token():
+    s = db.get_settings()
+    if not s.get("upload_token"):
+        import secrets
+        db.set_settings({"upload_token": "u" + secrets.token_urlsafe(16)})
+        s = db.get_settings()
+    return s["upload_token"]
+
+
+@route("GET", "/api/phone/pairing")
+def phone_pairing(h, q, b):
+    """휴대폰 앱이 QR로 읽어 갈 연결 정보 (업로드 전용 토큰만 포함)."""
+    s = db.get_settings()
+    if not s.get("sheets_url"):
+        return {"ready": False}
+    payload = "seteuk://pair?" + urllib.parse.urlencode({"u": s["sheets_url"], "t": ensure_upload_token(),
+                                                         "n": s.get("teacher_name") or ""})
+    return {"ready": True, "payload": payload}
+
+
+@route("POST", "/api/phone/scan")
+def phone_scan(h, q, b):
+    return {"ok": True, "imported": sheets.drive_inbox_scan()}
 
 
 @route("POST", "/api/export/sheets")
@@ -777,8 +841,11 @@ def prompts_guide(h, q, b):
 def student_notes_text(h, q, b, sid):
     conn = db.connect()
     s = db.row(conn, "SELECT * FROM students WHERE id=?", (int(sid),))
+    c = db.row(conn, "SELECT kind FROM classes WHERE id=?", (s["class_id"],))
     notes = db.rows(conn, "SELECT * FROM notes WHERE student_id=? AND use_in_draft=1 ORDER BY date, id", (int(sid),))
     conn.close()
+    if q.get("area"):
+        notes = [n for n in notes if db.note_area(n, c["kind"] or "교과") == q["area"]]
     lines = ["- [%s/%s%s] %s" % (n["date"] or "", n["kind"] or "", ("/" + n["category"]) if n["category"] else "", n["content"])
              for n in notes]
     return {"text": "\n".join(lines), "count": len(notes)}
@@ -869,6 +936,8 @@ def sources_notes(h, q, b):
 def open_privacy(h, q, b):
     panes = {"fda": "Privacy_AllFiles", "automation": "Privacy_Automation"}
     pane = panes.get(b.get("pane"), "Privacy_AllFiles")
+    if not platform_util.IS_MAC:
+        return {"ok": False}
     subprocess.Popen(["open", "x-apple.systempreferences:com.apple.preference.security?" + pane])
     return {"ok": True}
 
@@ -985,7 +1054,8 @@ class Handler(BaseHTTPRequestHandler):
             path = "/index.html"
         if path == "/google_apps_script.gs":
             with open(os.path.join(db.APP_DIR, "google_apps_script.gs"), encoding="utf-8") as f:
-                text = f.read().replace("var TOKEN = '';", "var TOKEN = '%s';" % ensure_token())
+                text = f.read().replace("var TOKEN = '';", "var TOKEN = '%s';" % ensure_token()) \
+                    .replace("var UPLOAD_TOKEN = '';", "var UPLOAD_TOKEN = '%s';" % ensure_upload_token())
             return self._send(200, text.encode("utf-8"), "text/plain; charset=utf-8")
         full = os.path.normpath(os.path.join(STATIC_DIR, path.lstrip("/")))
         if not full.startswith(STATIC_DIR) or not os.path.isfile(full):
@@ -999,12 +1069,12 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_csv(self, q):
         conn = db.connect()
         try:
-            label, rows = sheets.class_table(conn, int(q.get("class_id", 0)))
+            label, header, rows = sheets.class_table(conn, int(q.get("class_id", 0)))
         except Exception as e:  # noqa
             conn.close()
             return self._send(400, {"error": str(e)})
         conn.close()
-        data = sheets.to_csv(sheets.HEADER, rows).encode("utf-8")
+        data = sheets.to_csv(header, rows).encode("utf-8")
         fname = urllib.parse.quote("세특_%s_%s.csv" % (label, datetime.date.today().isoformat()))
         self._send(200, data, "text/csv; charset=utf-8",
                    {"Content-Disposition": "attachment; filename*=UTF-8''%s" % fname})
@@ -1067,6 +1137,7 @@ def main():
         return
     httpd.daemon_threads = True
     ensure_token()
+    ensure_upload_token()
     pipeline.start_worker()
     watcher.start()
     sheets.start()

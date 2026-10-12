@@ -1,9 +1,10 @@
 /**
- * 세특도우미 ↔ 구글시트·드라이브 연결 스크립트 (버전 2)
+ * 세특도우미 ↔ 구글시트·드라이브 연결 스크립트 (버전 3)
  *
  * 하는 일
  *  - 세특도우미의 학급별 세특·관찰기록을 이 시트에 자동으로 반영 (앱 → 시트, 보기용 사본)
  *  - 하루 한 번 전체 기록을 압축해 내 구글 드라이브 '세특도우미 백업' 폴더에 저장 (최근 30개)
+ *  - 휴대폰 '세특 녹음' 앱의 녹음을 드라이브 '세특도우미 녹음함'에 받아 컴퓨터로 전달
  *
  * 설치
  *  1. 구글시트에서 [확장 프로그램] → [Apps Script]
@@ -16,22 +17,33 @@
  *
  * 스크립트를 새 버전으로 바꿨을 때: [배포] → [배포 관리] → 연필 → 버전: '새 버전' → 배포 (URL은 그대로)
  */
-var TOKEN = '';            // 세특도우미 설정의 '보안 토큰'과 같아야 합니다
-var SCRIPT_VERSION = 2;
+var TOKEN = '';            // 컴퓨터 프로그램용 (모든 기능)
+var UPLOAD_TOKEN = '';     // 휴대폰 앱용 (녹음 올리기만 가능)
+var SCRIPT_VERSION = 3;
+var INBOX_FOLDER = '세특도우미 녹음함';
 var BACKUP_FOLDER = '세특도우미 백업';
 var REGISTRY = '_세특도우미';
 
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
-    if (TOKEN && data.token !== TOKEN) return json_({ ok: false, error: '보안 토큰이 일치하지 않습니다.' });
     var action = data.action || 'sync_one';
+    // 휴대폰 앱은 업로드 전용 토큰으로 녹음 올리기·연결 확인만 할 수 있음
+    if (UPLOAD_TOKEN && data.token === UPLOAD_TOKEN && (action === 'upload_recording' || action === 'ping_phone')) {
+      if (action === 'ping_phone') return json_({ ok: true, version: SCRIPT_VERSION });
+      return json_(uploadRecording_(data));
+    }
+    if (TOKEN && data.token !== TOKEN) return json_({ ok: false, error: '보안 토큰이 일치하지 않습니다.' });
     if (action === 'ping') return json_({ ok: true, version: SCRIPT_VERSION, url: SpreadsheetApp.getActiveSpreadsheet().getUrl() });
     if (action === 'sync') return json_(sync_(data.sheets || []));
     if (action === 'sync_one') return json_(sync_([{ name: data.sheet, header: data.header, rows: data.rows }], true));
     if (action === 'backup') return json_(backup_(data));
     if (action === 'list_backups') return json_(listBackups_());
     if (action === 'get_backup') return json_(getBackup_(data.id));
+    if (action === 'upload_recording') return json_(uploadRecording_(data));
+    if (action === 'list_inbox') return json_(listInbox_());
+    if (action === 'get_inbox_file') return json_(getInboxFile_(data.id));
+    if (action === 'done_inbox') return json_(doneInbox_(data.id));
     return json_({ ok: false, error: '알 수 없는 요청: ' + action });
   } catch (err) {
     return json_({ ok: false, error: String(err) });
@@ -114,6 +126,56 @@ function getBackup_(id) {
   var x = DriveApp.getFileById(id);
   if (x.getParents().next().getName() !== BACKUP_FOLDER) return { ok: false, error: '백업 폴더의 파일이 아닙니다.' };
   return { ok: true, version: SCRIPT_VERSION, data: Utilities.base64Encode(x.getBlob().getBytes()) };
+}
+
+function inbox_() {
+  var it = DriveApp.getFoldersByName(INBOX_FOLDER);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(INBOX_FOLDER);
+}
+
+function doneFolder_() {
+  var root = inbox_();
+  var it = root.getFoldersByName('처리완료');
+  return it.hasNext() ? it.next() : root.createFolder('처리완료');
+}
+
+function uploadRecording_(data) {
+  var name = String(data.filename || ('녹음-' + Date.now() + '.m4a')).replace(/[\\/:*?"<>|]/g, '_');
+  var blob = Utilities.newBlob(Utilities.base64Decode(data.data), data.mime || 'audio/mp4', name);
+  var file = inbox_().createFile(blob);
+  file.setDescription(JSON.stringify({ recorded_at: data.recorded_at || '', kind: data.kind || '', title: data.title || '',
+                                       memo: data.memo || '', device: data.device || '' }));
+  return { ok: true, version: SCRIPT_VERSION, id: file.getId() };
+}
+
+function listInbox_() {
+  var out = [];
+  var it = inbox_().getFiles();
+  while (it.hasNext()) {
+    var f = it.next();
+    var meta = {};
+    try { meta = JSON.parse(f.getDescription() || '{}'); } catch (e) {}
+    out.push({ id: f.getId(), name: f.getName(), size: f.getSize(), mime: f.getMimeType(), created: f.getDateCreated().toISOString(), meta: meta });
+  }
+  return { ok: true, version: SCRIPT_VERSION, files: out };
+}
+
+function getInboxFile_(id) {
+  var f = DriveApp.getFileById(id);
+  if (f.getParents().next().getName() !== INBOX_FOLDER) return { ok: false, error: '녹음함 파일이 아닙니다.' };
+  return { ok: true, version: SCRIPT_VERSION, data: Utilities.base64Encode(f.getBlob().getBytes()) };
+}
+
+function doneInbox_(id) {
+  var f = DriveApp.getFileById(id);
+  f.moveTo(doneFolder_());
+  // 처리완료 폴더는 최근 200개만 보관
+  var files = [];
+  var it = doneFolder_().getFiles();
+  while (it.hasNext()) files.push(it.next());
+  files.sort(function (a, b) { return b.getDateCreated() - a.getDateCreated(); });
+  files.slice(200).forEach(function (x) { x.setTrashed(true); });
+  return { ok: true, version: SCRIPT_VERSION };
 }
 
 function json_(obj) {

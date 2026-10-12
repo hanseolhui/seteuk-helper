@@ -4,11 +4,14 @@ import os
 import shutil
 import sqlite3
 import datetime
+import json
+
+import platform_util
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(APP_DIR)
 # 데이터는 프로그램(코드)과 분리해 사용자 라이브러리에 둔다 → 업데이트·재설치해도 기록이 보존됨
-SUPPORT_DIR = os.path.expanduser("~/Library/Application Support/세특도우미")
+SUPPORT_DIR = platform_util.support_dir()
 DATA_DIR = os.environ.get("SETEUK_DATA") or os.path.join(SUPPORT_DIR, "data")
 AUDIO_DIR = os.path.join(DATA_DIR, "audio")
 BACKUP_DIR = os.path.join(DATA_DIR, "backups")
@@ -23,7 +26,7 @@ DEFAULT_SETTINGS = {
     "teacher_subject": "",
     "style_examples": "",
     "draft_guidance": "",
-    "inbox_dir": os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs/세특녹음"),
+    "inbox_dir": os.path.join(platform_util.icloud_drive_dir(), "세특녹음"),
     "auto_process": "1",                # 수신 폴더 파일을 자동 전사·분리
     "sheets_url": "",
     "sheets_token": "",
@@ -48,13 +51,61 @@ DEFAULT_SETTINGS = {
     "sheets_last_sync": "",
     "sheets_last_error": "",
     "drive_last_backup": "",
+    # 휴대폰 앱(아이폰·안드로이드) → 구글 드라이브 → 이 컴퓨터
+    "drive_inbox": "1",
+    "upload_token": "",
+    # 기재 영역별 NEIS 바이트 한도 (학교 기재요령에 맞게 조정)
+    "area_limits": "",
+    "onboarded": "0",
+    "teacher_name": "",
 }
+
+# 학교생활기록부 기재 영역. 학급 유형에 따라 쓸 수 있는 영역이 정해진다.
+AREAS = [
+    {"id": "subject", "name": "교과 세특", "full": "과목별 세부능력 및 특기사항", "bytes": 1500, "kinds": ["교과"]},
+    {"id": "individual", "name": "개인별 세특", "full": "개인별 세부능력 및 특기사항", "bytes": 1500, "kinds": ["담임"]},
+    {"id": "behavior", "name": "행동특성", "full": "행동특성 및 종합의견", "bytes": 900, "kinds": ["담임"]},
+    {"id": "autonomy", "name": "자율·자치", "full": "자율·자치활동 특기사항", "bytes": 1500, "kinds": ["담임"]},
+    {"id": "career", "name": "진로활동", "full": "진로활동 특기사항", "bytes": 2100, "kinds": ["담임"]},
+    {"id": "club", "name": "동아리", "full": "동아리활동 특기사항", "bytes": 1500, "kinds": ["동아리"]},
+]
+AREA_IDS = [a["id"] for a in AREAS]
+CLASS_KINDS = ["교과", "담임", "동아리", "기타"]
+
+
+def areas_for_kind(kind):
+    """학급 유형별 영역. 첫 번째가 기본 영역."""
+    order = {"담임": ["behavior", "autonomy", "career", "individual"],
+             "동아리": ["club"], "기타": AREA_IDS}.get(kind, ["subject"])
+    return [next(a for a in AREAS if a["id"] == i) for i in order]
+
+
+def area_name(area_id):
+    a = next((x for x in AREAS if x["id"] == area_id), None)
+    return a["name"] if a else (area_id or "")
+
+
+def area_limit(area_id, settings=None):
+    settings = settings or get_settings()
+    try:
+        custom = json.loads(settings.get("area_limits") or "{}")
+    except ValueError:
+        custom = {}
+    if area_id in custom:
+        try:
+            return int(custom[area_id])
+        except (TypeError, ValueError):
+            pass
+    if area_id == "subject" and settings.get("byte_limit"):
+        return int(settings["byte_limit"])  # 1.x 설정 호환
+    a = next((x for x in AREAS if x["id"] == area_id), None)
+    return a["bytes"] if a else 1500
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS classes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     year INTEGER, semester INTEGER, grade INTEGER, class_no INTEGER,
-    subject TEXT DEFAULT '', label TEXT,
+    subject TEXT DEFAULT '', label TEXT, kind TEXT DEFAULT '교과',
     created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS students (
@@ -76,6 +127,7 @@ CREATE TABLE IF NOT EXISTS notes (
     recording_id INTEGER REFERENCES recordings(id) ON DELETE SET NULL,
     date TEXT, kind TEXT DEFAULT '수업', category TEXT DEFAULT '',
     content TEXT NOT NULL, evidence TEXT DEFAULT '', use_in_draft INTEGER DEFAULT 1,
+    area TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS unmatched (
@@ -86,7 +138,7 @@ CREATE TABLE IF NOT EXISTS unmatched (
 CREATE TABLE IF NOT EXISTS drafts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-    area TEXT DEFAULT '세특', content TEXT, bytes INTEGER, status TEXT DEFAULT '초안',
+    area TEXT DEFAULT 'subject', content TEXT, bytes INTEGER, status TEXT DEFAULT '초안',
     created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
@@ -143,6 +195,7 @@ def init():
     conn = connect()
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
+    _migrate_columns(conn)
     for k, v in DEFAULT_SETTINGS.items():
         conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
     # 비정상 종료로 '진행중'에 남은 작업 정리
@@ -151,6 +204,24 @@ def init():
     conn.commit()
     conn.close()
     daily_backup()
+
+
+def _migrate_columns(conn):
+    """예전 버전 DB에 새 컬럼 추가."""
+    def cols(t):
+        return {r[1] for r in conn.execute("PRAGMA table_info(%s)" % t)}
+    if "kind" not in cols("classes"):
+        conn.execute("ALTER TABLE classes ADD COLUMN kind TEXT DEFAULT '교과'")
+    if "area" not in cols("notes"):
+        conn.execute("ALTER TABLE notes ADD COLUMN area TEXT DEFAULT ''")
+    conn.execute("UPDATE drafts SET area='subject' WHERE area IS NULL OR area='' OR area='세특'")
+
+
+def note_area(note, class_kind):
+    """관찰기록의 영역. 비어 있으면 학급 유형의 기본 영역."""
+    if note.get("area"):
+        return note["area"]
+    return areas_for_kind(class_kind or "교과")[0]["id"]
 
 
 def daily_backup():
@@ -208,8 +279,15 @@ def set_settings(values):
 
 
 def class_label(c):
+    kind = c.get("kind") or "교과"
+    if kind == "동아리":
+        return "동아리 %s" % (c.get("subject") or "")
+    if kind == "기타" and not c.get("grade"):
+        return c.get("subject") or "모둠"
     label = "%s학년 %s반" % (c.get("grade") or "?", c.get("class_no") or "?")
-    if c.get("subject"):
+    if kind == "담임":
+        label += " (담임)"
+    elif c.get("subject"):
         label += " " + c["subject"]
     return label
 

@@ -135,7 +135,9 @@ def shell_version():
 
 
 def shell_outdated():
-    return shell_version() < version.SHELL_REQUIRED
+    """예전 맥 앱(1.1, 창 없는 실행기)에서 돌 때만 '새 앱으로 바꾸기'를 안내. 개발 실행·윈도우는 해당 없음."""
+    import platform_util
+    return bool(platform_util.IS_MAC and os.environ.get("SETEUK_APP")) and shell_version() < version.SHELL_REQUIRED
 
 
 def _installed_app_path():

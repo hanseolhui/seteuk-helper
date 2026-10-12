@@ -202,8 +202,8 @@ async function router(soft) {
       case 'recording': await viewRecording(parts[1]); break;
       case 'classes': await viewClasses(); break;
       case 'class': await viewClass(parts[1]); break;
-      case 'student': await viewStudent(parts[1]); break;
-      case 'drafts': await viewDrafts(parts[1]); break;
+      case 'student': await viewStudent(parts[1], parts[2]); break;
+      case 'drafts': await viewDrafts(parts[1], parts[2]); break;
       case 'settings': await viewSettings(parts[1]); break;
       case 'prompts': await viewPrompts(); break;
       default: await viewDashboard();
@@ -465,7 +465,7 @@ async function viewRecording(id) {
             <h3><a href="#/student/${sid}">${g.number}번 ${esc(g.name)}</a> <span class="badge">${g.items.length}건</span></h3>
             ${g.items.map(n => `<div class="note" data-note="${n.id}">
               <div class="meta"><span class="badge blue">${esc(n.category || '기타')}</span>
-                <span class="tools"><select class="n-move" style="width:auto;padding:2px 6px;font-size:12px">${studentOpts(n.student_id)}</select>
+                <span class="tools">${d.areas.length > 1 ? `<select class="n-area" style="width:auto;padding:2px 6px;font-size:12px">${areaOptions(d.areas, n.area_eff)}</select>` : ''}<select class="n-move" style="width:auto;padding:2px 6px;font-size:12px">${studentOpts(n.student_id)}</select>
                 <button class="sm n-edit">수정</button><button class="sm danger n-del">삭제</button></span></div>
               <div class="content">${esc(n.content)}</div>
               ${n.evidence ? `<div class="evidence">${esc(n.evidence)}</div>` : ''}</div>`).join('')}
@@ -522,7 +522,8 @@ async function viewRecording(id) {
       if (!e.target.value) return;
       await api('/api/notes/save', { ...n, student_id: +e.target.value, use_in_draft: !!n.use_in_draft }); toast('학생을 변경했습니다'); reload();
     };
-    $('.n-edit', el).onclick = () => editNoteModal(n, reload);
+    $('.n-edit', el).onclick = () => editNoteModal(n, reload, n.student_id, d.areas);
+    if ($('.n-area', el)) $('.n-area', el).onchange = async e => { await api('/api/notes/save', { ...n, area: e.target.value, use_in_draft: !!n.use_in_draft }); toast('기재 영역을 바꿨습니다'); };
   });
   $$('[data-un]').forEach(el => {
     const uid = +el.dataset.un;
@@ -534,24 +535,31 @@ async function viewRecording(id) {
   });
 }
 
-function editNoteModal(n, onSaved, studentId) {
+function areaOptions(areas, sel) {
+  return areas.map(a => `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
+}
+
+function editNoteModal(n, onSaved, studentId, areas) {
   const isNew = !n;
-  n = n || { date: today(), kind: '수업', category: '', content: '', use_in_draft: 1, student_id: studentId };
+  areas = areas || [];
+  n = n || { date: today(), kind: '수업', category: '', content: '', use_in_draft: 1, student_id: studentId, area: '' };
+  const cur = n.area || n.area_eff || (areas[0] && areas[0].id) || '';
   modal(`<h2>${isNew ? '관찰기록 추가' : '관찰기록 수정'}</h2>
     <div class="row">
       <label class="field"><span>날짜</span><input type="date" id="e-date" value="${esc(n.date || today())}"></label>
       <label class="field"><span>유형</span><select id="e-kind"><option ${n.kind === '수업' ? 'selected' : ''}>수업</option><option ${n.kind === '상담' ? 'selected' : ''}>상담</option></select></label>
-      <label class="field"><span>영역</span><select id="e-cat">${CATEGORIES.map(c => `<option ${c === n.category ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+      ${areas.length > 1 ? `<label class="field"><span>기재 영역</span><select id="e-area">${areaOptions(areas, cur)}</select></label>` : ''}
+      <label class="field"><span>분류</span><select id="e-cat">${CATEGORIES.map(c => `<option ${c === n.category ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
     </div>
     <label class="field" style="margin-top:10px"><span>내용</span><textarea id="e-content" rows="6">${esc(n.content)}</textarea></label>
-    <label class="check" style="margin-top:8px"><input type="checkbox" id="e-use" ${n.use_in_draft ? 'checked' : ''}> 세특 초안 생성에 사용</label>
+    <label class="check" style="margin-top:8px"><input type="checkbox" id="e-use" ${n.use_in_draft ? 'checked' : ''}> 초안 생성에 사용</label>
     <div class="modal-actions"><button id="e-cancel">취소</button><button class="primary" id="e-save">저장</button></div>`, box => {
     $('#e-content', box).focus();
     $('#e-cancel', box).onclick = closeModal;
     $('#e-save', box).onclick = async () => {
       await api('/api/notes/save', { id: n.id, student_id: n.student_id, recording_id: n.recording_id, date: $('#e-date', box).value,
         kind: $('#e-kind', box).value, category: $('#e-cat', box).value, content: $('#e-content', box).value,
-        use_in_draft: $('#e-use', box).checked });
+        use_in_draft: $('#e-use', box).checked, area: $('#e-area', box) ? $('#e-area', box).value : (n.area || '') });
       closeModal(); toast('저장했습니다'); onSaved && onSaved();
     };
   });
@@ -559,33 +567,65 @@ function editNoteModal(n, onSaved, studentId) {
 
 // ───────────────────────── 학급 ─────────────────────────
 
+const KIND_HELP = {
+  '교과': '수업하는 반 (과목별). 교과 세특을 씁니다.',
+  '담임': '담임 학급. 행동특성 및 종합의견, 자율·자치, 진로활동, 개인별 세특을 씁니다.',
+  '동아리': '여러 반 학생이 모인 동아리. 명단은 학번(예: 20315)으로 넣으세요.',
+  '기타': '방과후·모둠 등. 모든 영역을 쓸 수 있습니다.',
+};
+
+function classFormFields(c) {
+  const kind = c.kind || '교과';
+  const named = kind === '동아리' || kind === '기타';
+  return `
+    <label class="field shrink" style="min-width:110px"><span>유형</span><select id="c-kind">${['교과', '담임', '동아리', '기타'].map(k => `<option ${k === kind ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
+    <label class="field"><span>연도</span><input id="c-year" type="number" value="${c.year}"></label>
+    <label class="field"><span>학기</span><select id="c-sem"><option value="1" ${c.semester == 1 ? 'selected' : ''}>1학기</option><option value="2" ${c.semester == 2 ? 'selected' : ''}>2학기</option></select></label>
+    <label class="field ${named ? 'hidden' : ''}" data-f="grade"><span>학년</span><input id="c-grade" type="number" min="1" max="6" value="${c.grade ?? ''}" placeholder="2"></label>
+    <label class="field ${named ? 'hidden' : ''}" data-f="no"><span>반</span><input id="c-no" type="number" min="1" value="${c.class_no ?? ''}" placeholder="3"></label>
+    <label class="field ${kind === '담임' ? 'hidden' : ''}" data-f="subj"><span id="c-subj-l">${named ? (kind === '동아리' ? '동아리 이름' : '이름') : '과목'}</span><input id="c-subj" value="${esc(c.subject || '')}" placeholder="${named ? '예: 로봇탐구반' : '예: 국어'}"></label>`;
+}
+
+function bindClassForm() {
+  const upd = () => {
+    const k = $('#c-kind').value, named = k === '동아리' || k === '기타';
+    $('[data-f=grade]').classList.toggle('hidden', named);
+    $('[data-f=no]').classList.toggle('hidden', named);
+    $('[data-f=subj]').classList.toggle('hidden', k === '담임');
+    $('#c-subj-l').textContent = named ? (k === '동아리' ? '동아리 이름' : '이름') : '과목';
+    $('#c-kind-help').textContent = KIND_HELP[k];
+  };
+  $('#c-kind').onchange = upd; upd();
+}
+
+function classFormValues() {
+  return { kind: $('#c-kind').value, year: $('#c-year').value, semester: $('#c-sem').value, grade: $('#c-grade').value,
+    class_no: $('#c-no').value, subject: $('#c-subj').value };
+}
+
 async function viewClasses() {
   const y = new Date().getFullYear(), sem = (new Date().getMonth() + 1) >= 8 ? 2 : 1;
   view.innerHTML = `
-    <div class="page-head"><div><h1>학급·학생</h1><div class="muted">수업하는 학급과 학생 명단을 관리합니다. 과목이 다르면 같은 반도 따로 만드세요.</div></div></div>
+    <div class="page-head"><div><h1>학급·학생</h1><div class="muted">수업하는 반, 담임 학급, 동아리를 관리합니다. 과목이 다르면 같은 반도 따로 만드세요.</div></div></div>
     <div class="card">
       <h2>새 학급</h2>
-      <div class="row">
-        <label class="field"><span>연도</span><input id="c-year" type="number" value="${y}"></label>
-        <label class="field"><span>학기</span><select id="c-sem"><option value="1" ${sem === 1 ? 'selected' : ''}>1학기</option><option value="2" ${sem === 2 ? 'selected' : ''}>2학기</option></select></label>
-        <label class="field"><span>학년</span><input id="c-grade" type="number" min="1" max="6" placeholder="2"></label>
-        <label class="field"><span>반</span><input id="c-no" type="number" min="1" placeholder="3"></label>
-        <label class="field"><span>과목</span><input id="c-subj" placeholder="예: 국어"></label>
-        <button class="primary shrink" id="c-add">학급 추가</button>
+      <div class="row">${classFormFields({ year: y, semester: sem, kind: '교과' })}
+        <button class="primary shrink" id="c-add">추가</button>
       </div>
+      <p class="help" id="c-kind-help"></p>
     </div>
     <div class="card">
       <h2>학급 목록</h2>
-      ${state.classes.length ? `<div class="table-wrap"><table><thead><tr><th>학급</th><th>학기</th><th class="right">학생 수</th><th></th></tr></thead><tbody>
-        ${state.classes.map(c => `<tr class="clickable" data-href="#/class/${c.id}"><td><b>${esc(c.label)}</b></td><td>${c.year}년 ${c.semester}학기</td>
-          <td class="num">${c.students}</td><td class="right"><a href="#/drafts/${c.id}" class="small">세특 초안 →</a></td></tr>`).join('')}
+      ${state.classes.length ? `<div class="table-wrap"><table><thead><tr><th>학급</th><th>유형</th><th>학기</th><th class="right">학생 수</th><th></th></tr></thead><tbody>
+        ${state.classes.map(c => `<tr class="clickable" data-href="#/class/${c.id}"><td><b>${esc(c.label)}</b></td><td><span class="badge">${esc(c.kind || '교과')}</span></td><td>${c.year}년 ${c.semester}학기</td>
+          <td class="num">${c.students}</td><td class="right"><a href="#/drafts/${c.id}" class="small">초안 →</a></td></tr>`).join('')}
       </tbody></table></div>` : '<p class="muted">아직 학급이 없습니다.</p>'}
     </div>`;
   bindRowLinks();
+  bindClassForm();
   $('#c-add').onclick = async () => {
-    const r = await api('/api/classes/save', { year: $('#c-year').value, semester: $('#c-sem').value, grade: $('#c-grade').value,
-      class_no: $('#c-no').value, subject: $('#c-subj').value });
-    toast('학급을 만들었습니다. 명단을 붙여넣으세요.');
+    const r = await api('/api/classes/save', classFormValues());
+    toast('만들었습니다. 명단을 붙여넣으세요.');
     location.hash = '#/class/' + r.id;
   };
 }
@@ -593,40 +633,37 @@ async function viewClasses() {
 async function viewClass(id) {
   const d = await api('/api/classes/' + id);
   const c = d.class;
+  const club = c.kind === '동아리';
   view.innerHTML = `
-    <div class="page-head"><div><a href="#/classes" class="small">← 학급 목록</a><h1>${esc(c.label)}</h1><div class="muted">${c.year}년 ${c.semester}학기 · 학생 ${d.students.length}명</div></div>
-      <div class="actions"><a class="btn" href="#/recordings/${c.id}">이 학급 녹음</a><a class="btn" href="#/drafts/${c.id}">세특 초안</a></div></div>
+    <div class="page-head"><div><a href="#/classes" class="small">← 학급 목록</a><h1>${esc(c.label)}</h1><div class="muted">${esc(c.kind || '교과')} · ${c.year}년 ${c.semester}학기 · 학생 ${d.students.length}명 · 기재 영역: ${d.areas.map(a => esc(a.name)).join(', ')}</div></div>
+      <div class="actions"><a class="btn" href="#/recordings/${c.id}">이 학급 녹음</a><a class="btn" href="#/drafts/${c.id}">초안</a></div></div>
     <div class="split">
       <div class="card">
         <div class="section-title"><h2>학생 명단</h2><button class="sm" id="s-add">+ 학생 추가</button></div>
-        ${d.students.length ? `<div class="table-wrap"><table><thead><tr><th>번호</th><th>이름</th><th>별칭 (전사 오인식 대비)</th><th class="right">기록</th><th>초안</th><th></th></tr></thead><tbody>
+        ${d.students.length ? `<div class="table-wrap"><table><thead><tr><th>${club ? '학번' : '번호'}</th><th>이름</th><th>별칭 (전사 오인식 대비)</th><th class="right">기록</th><th></th></tr></thead><tbody>
           ${d.students.map(s => `<tr class="clickable" data-href="#/student/${s.id}" data-sid="${s.id}">
             <td class="num">${s.number ?? ''}</td><td><b>${esc(s.name)}</b></td><td class="small muted">${esc(s.aliases)}</td>
-            <td class="num">${s.notes}</td><td>${s.draft_status ? `<span class="badge ${s.draft_status === '확정' ? 'green' : 'blue'}">${s.draft_status}</span>` : '<span class="muted small">-</span>'}</td>
+            <td class="num">${s.notes}</td>
             <td class="right nowrap"><button class="sm s-edit">수정</button></td></tr>`).join('')}
         </tbody></table></div>` : '<p class="muted">오른쪽에 명단을 붙여넣으세요.</p>'}
       </div>
       <div class="stack">
         <div class="card">
           <h2>명단 일괄 붙여넣기</h2>
-          <p class="help" style="margin-top:-6px">NEIS나 엑셀에서 <b>번호, 이름</b> 두 열을 복사해 붙여넣으세요. 같은 번호가 있으면 이름을 덮어씁니다.</p>
-          <textarea id="bulk" rows="10" placeholder="1	김민수&#10;2	이서연&#10;3	박지훈"></textarea>
+          <p class="help" style="margin-top:-6px">NEIS나 엑셀에서 <b>${club ? '학번, 이름' : '번호, 이름'}</b> 두 열을 복사해 붙여넣으세요. 같은 번호가 있으면 이름을 덮어씁니다.</p>
+          <textarea id="bulk" rows="10" placeholder="${club ? '20315	김민수&#10;10702	이서연' : '1	김민수&#10;2	이서연&#10;3	박지훈'}"></textarea>
           <div class="row" style="margin-top:8px"><span id="bulk-preview" class="muted small"></span><button class="primary shrink" id="bulk-save">명단 저장</button></div>
         </div>
         <div class="card">
           <h2>학급 정보</h2>
-          <div class="row">
-            <label class="field"><span>연도</span><input id="c-year" type="number" value="${c.year}"></label>
-            <label class="field"><span>학기</span><select id="c-sem"><option value="1" ${c.semester === 1 ? 'selected' : ''}>1</option><option value="2" ${c.semester === 2 ? 'selected' : ''}>2</option></select></label>
-            <label class="field"><span>학년</span><input id="c-grade" type="number" value="${c.grade}"></label>
-            <label class="field"><span>반</span><input id="c-no" type="number" value="${c.class_no}"></label>
-          </div>
-          <div class="row" style="margin-top:10px"><label class="field"><span>과목</span><input id="c-subj" value="${esc(c.subject)}"></label>
-            <button class="shrink" id="c-save">저장</button><button class="shrink danger" id="c-del">학급 삭제</button></div>
+          <div class="row">${classFormFields(c)}</div>
+          <p class="help" id="c-kind-help"></p>
+          <div class="row" style="margin-top:10px"><span></span><button class="shrink" id="c-save">저장</button><button class="shrink danger" id="c-del">학급 삭제</button></div>
         </div>
       </div>
     </div>`;
   bindRowLinks();
+  bindClassForm();
   const reload = () => router(true);
   $('#bulk').oninput = () => {
     const lines = $('#bulk').value.split('\n').filter(l => l.trim()).length;
@@ -636,15 +673,11 @@ async function viewClass(id) {
     const r = await api('/api/students/bulk', { class_id: c.id, text: $('#bulk').value });
     toast(`추가 ${r.added}명, 수정 ${r.updated}명`); $('#bulk').value = ''; delete $('#bulk').dataset.dirty; reload();
   };
-  $('#s-add').onclick = () => editStudentModal({ class_id: c.id, number: (d.students.at(-1)?.number || 0) + 1 }, reload);
+  $('#s-add').onclick = () => editStudentModal({ class_id: c.id, number: club ? '' : (d.students.at(-1)?.number || 0) + 1 }, reload);
   $$('.s-edit').forEach(b => b.onclick = () => editStudentModal(d.students.find(s => s.id === +b.closest('tr').dataset.sid), reload));
-  $('#c-save').onclick = async () => {
-    await api('/api/classes/save', { id: c.id, year: $('#c-year').value, semester: $('#c-sem').value, grade: $('#c-grade').value,
-      class_no: $('#c-no').value, subject: $('#c-subj').value });
-    toast('저장했습니다'); reload();
-  };
+  $('#c-save').onclick = async () => { await api('/api/classes/save', Object.assign({ id: c.id }, classFormValues())); toast('저장했습니다'); reload(); };
   $('#c-del').onclick = async () => {
-    if (!confirmBox(`${c.label} 학급과 학생 ${d.students.length}명의 관찰기록·초안을 모두 삭제합니다. 되돌릴 수 없습니다. 계속할까요?`)) return;
+    if (!confirmBox(`${c.label}와 학생 ${d.students.length}명의 관찰기록·초안을 모두 삭제합니다. 되돌릴 수 없습니다. 계속할까요?`)) return;
     await api('/api/classes/delete', { id: c.id }); location.hash = '#/classes';
   };
 }
@@ -673,48 +706,55 @@ function editStudentModal(s, onSaved) {
 
 // ───────────────────────── 학생 상세 ─────────────────────────
 
-async function viewStudent(id) {
+async function viewStudent(id, areaParam) {
   const d = await api('/api/students/' + id);
-  const s = d.student, c = d.class, limit = d.byte_limit;
+  const s = d.student, c = d.class, areas = d.areas;
+  const area = areas.find(a => a.id === areaParam) || areas[0];
+  const limit = area.limit, multi = areas.length > 1;
   const idx = d.siblings.findIndex(x => x.id === s.id);
   const prev = d.siblings[idx - 1], next = d.siblings[idx + 1];
-  const current = d.drafts.find(x => x.status === '확정') || d.drafts[0];
+  const drafts = d.drafts.filter(x => (x.area || 'subject') === area.id);
+  const current = drafts.find(x => x.status === '확정') || drafts[0];
+  const notesInArea = d.notes.filter(n => n.area_eff === area.id);
+  const sib = x => `#/student/${x.id}${multi ? '/' + area.id : ''}`;
   view.innerHTML = `
     <div class="page-head"><div><a href="#/class/${c.id}" class="small">← ${esc(c.label)}</a>
-      <h1>${s.number}번 ${esc(s.name)}</h1><div class="muted small">${s.aliases ? '별칭: ' + esc(s.aliases) + ' · ' : ''}${s.memo ? '메모: ' + esc(s.memo) : ''}</div></div>
+      <h1>${s.number ?? ''}${c.kind === '동아리' ? ' ' : '번 '}${esc(s.name)}</h1><div class="muted small">${s.aliases ? '별칭: ' + esc(s.aliases) + ' · ' : ''}${s.memo ? '메모: ' + esc(s.memo) : ''}</div></div>
       <div class="actions">
-        ${prev ? `<a class="btn" href="#/student/${prev.id}">← ${prev.number}번 ${esc(prev.name)}</a>` : ''}
-        ${next ? `<a class="btn" href="#/student/${next.id}">${next.number}번 ${esc(next.name)} →</a>` : ''}
+        ${prev ? `<a class="btn" href="${sib(prev)}">← ${esc(prev.name)}</a>` : ''}
+        ${next ? `<a class="btn" href="${sib(next)}">${esc(next.name)} →</a>` : ''}
         <button id="st-edit">학생 정보</button></div></div>
+    ${multi ? `<div class="tabs">${areas.map(a => `<button class="${a.id === area.id ? 'on' : ''}" data-area="${a.id}">${esc(a.name)} <span class="muted small">${d.notes.filter(n => n.area_eff === a.id).length}</span></button>`).join('')}</div>` : ''}
     <div class="split">
       <div class="card">
-        <div class="section-title"><h2>관찰기록 ${d.notes.length}건</h2><span><button class="sm" id="n-copy" title="Gemini·ChatGPT에 붙여넣을 수 있게 복사">관찰기록 복사</button> <button class="sm" id="n-add">+ 직접 추가</button></span></div>
-        ${d.notes.length ? '' : '<p class="muted">아직 기록이 없습니다. 녹음을 올리거나 직접 추가하세요.</p>'}
-        ${d.notes.map(n => `<div class="note ${n.use_in_draft ? '' : 'off'}" data-note="${n.id}">
+        <div class="section-title"><h2>${multi ? esc(area.name) + ' ' : ''}관찰기록 ${notesInArea.length}건</h2><span><button class="sm" id="n-copy" title="Gemini·ChatGPT에 붙여넣을 수 있게 복사">관찰기록 복사</button> <button class="sm" id="n-add">+ 직접 추가</button></span></div>
+        ${notesInArea.length ? '' : `<p class="muted">이 영역의 기록이 없습니다. 녹음을 올리거나 직접 추가하세요.${multi ? ' 다른 영역 기록은 수정 → 기재 영역에서 옮길 수 있습니다.' : ''}</p>`}
+        ${notesInArea.map(n => `<div class="note ${n.use_in_draft ? '' : 'off'}" data-note="${n.id}">
           <div class="meta">${esc(n.date || '')} ${kindBadge(n.kind)} <span class="badge">${esc(n.category || '기타')}</span>
             ${n.recording_id ? `<a href="#/recording/${n.recording_id}" class="small">${n.has_audio ? '🎙 ' : ''}${esc(n.rec_title || '원본')}</a>` : '<span class="small">직접 입력</span>'}
-            <span class="tools"><label class="check small" title="세특 생성에 사용"><input type="checkbox" class="n-use" ${n.use_in_draft ? 'checked' : ''}>초안에 사용</label>
+            <span class="tools"><label class="check small" title="초안 생성에 사용"><input type="checkbox" class="n-use" ${n.use_in_draft ? 'checked' : ''}>초안에 사용</label>
             <button class="sm n-edit">수정</button><button class="sm danger n-del">삭제</button></span></div>
           <div class="content">${esc(n.content)}</div>
           ${n.evidence ? `<div class="evidence">${esc(n.evidence)}</div>` : ''}</div>`).join('')}
       </div>
       <div class="stack">
         <div class="card">
-          <div class="section-title"><h2>세특 초안</h2>${current ? `<span class="badge ${current.status === '확정' ? 'green' : 'blue'}">${current.status}</span>` : ''}</div>
+          <div class="section-title"><h2>${esc(area.full)}</h2>${current ? `<span class="badge ${current.status === '확정' ? 'green' : 'blue'}">${current.status}</span>` : ''}</div>
           <label class="field"><span>이번 초안에서 강조할 점 (선택)</span><input id="d-extra" placeholder="예: 탐구 보고서의 문제해결 과정, 진로(환경공학) 연계"></label>
-          <div class="row" style="margin-top:10px"><button class="primary shrink" id="d-gen" ${d.notes.length ? '' : 'disabled'}>✨ AI 초안 생성</button><span></span></div>
+          <div class="row" style="margin-top:10px"><button class="primary shrink" id="d-gen" ${notesInArea.length ? '' : 'disabled'}>✨ AI 초안 생성</button><span></span></div>
           <textarea id="d-text" rows="12" style="margin-top:12px" placeholder="AI 초안이 여기에 표시됩니다. 직접 작성·수정해도 됩니다.">${esc(current ? current.content : '')}</textarea>
           <div class="row" style="margin-top:6px;align-items:center"><span class="counter" id="d-count"></span><span></span>
             <button class="shrink sm" id="d-short">AI로 줄이기</button><button class="shrink sm" id="d-copy">복사</button></div>
           <div id="d-warn"></div>
           <div class="row" style="margin-top:12px"><span></span><button class="shrink" id="d-save">새 버전으로 저장</button><button class="shrink primary" id="d-final">확정</button></div>
         </div>
-        ${d.drafts.length ? `<div class="card"><h3>버전 기록 ${d.drafts.length}개</h3>
-          ${d.drafts.map(v => `<div class="version" data-ver="${v.id}"><div class="section-title" style="margin:0"><span>${esc(fmtDate(v.created_at))} · ${v.bytes}B ${v.status === '확정' ? '<span class="badge green">확정</span>' : ''}</span>
+        ${drafts.length ? `<div class="card"><h3>버전 기록 ${drafts.length}개</h3>
+          ${drafts.map(v => `<div class="version" data-ver="${v.id}"><div class="section-title" style="margin:0"><span>${esc(fmtDate(v.created_at))} · ${v.bytes}B ${v.status === '확정' ? '<span class="badge green">확정</span>' : ''}</span>
             <button class="link v-del">삭제</button></div><div class="preview">${esc(v.content)}</div></div>`).join('')}</div>` : ''}
       </div>
     </div>`;
   const reload = () => router(true);
+  $$('[data-area]').forEach(b => b.onclick = () => { location.hash = `#/student/${s.id}/${b.dataset.area}`; });
   const text = $('#d-text');
   const update = () => {
     const b = neisBytes(text.value);
@@ -724,42 +764,42 @@ async function viewStudent(id) {
     const nameHit = text.value.includes(s.name);
     let warn = '';
     if (found.length) warn += `<div class="warn">기재 금지 가능성이 있는 표현: <b>${found.map(esc).join(', ')}</b> — 학생부 기재요령을 확인하세요.</div>`;
-    if (nameHit) warn += `<div class="warn">본문에 학생 이름이 들어 있습니다. 세특에는 이름을 쓰지 않습니다.</div>`;
+    if (nameHit) warn += `<div class="warn">본문에 학생 이름이 들어 있습니다. 학생부에는 이름을 쓰지 않습니다.</div>`;
     if (b > limit) warn += `<div class="warn">${(b - limit).toLocaleString()}바이트 초과 — 'AI로 줄이기'를 사용하거나 직접 다듬으세요.</div>`;
     $('#d-warn').innerHTML = warn;
   };
   text.addEventListener('input', update); update();
   $('#st-edit').onclick = () => editStudentModal(s, reload);
-  $('#n-add').onclick = () => editNoteModal(null, reload, s.id);
-  $('#n-copy').onclick = async () => { const t = await api(`/api/students/${s.id}/notes_text`); copyText(t.text); };
+  $('#n-add').onclick = () => editNoteModal({ date: today(), kind: '수업', category: '', content: '', use_in_draft: 1, student_id: s.id, area: multi ? area.id : '' }, reload, s.id, areas);
+  $('#n-copy').onclick = async () => { const t = await api(`/api/students/${s.id}/notes_text?area=${area.id}`); copyText(t.text); };
   $$('[data-note]').forEach(el => {
     const n = d.notes.find(x => x.id === +el.dataset.note);
-    $('.n-edit', el).onclick = () => editNoteModal(n, reload);
+    $('.n-edit', el).onclick = () => editNoteModal(n, reload, s.id, areas);
     $('.n-del', el).onclick = async () => { if (confirmBox('이 관찰기록을 삭제할까요?')) { await api('/api/notes/delete', { id: n.id }); reload(); } };
     $('.n-use', el).onchange = async e => { await api('/api/notes/save', { ...n, use_in_draft: e.target.checked }); reload(); };
   });
   $('#d-gen').onclick = () => {
     if (text.value.trim() && text.dataset.dirty && !confirmBox('저장하지 않은 수정 내용이 있습니다. 새 초안을 만들까요? (지금 내용은 사라집니다)')) return;
     delete text.dataset.dirty;
-    runAI('draft', { student_id: s.id, extra: $('#d-extra').value }, `${s.number}번 ${s.name}`, reload);
+    runAI('draft', { student_id: s.id, extra: $('#d-extra').value, area: area.id }, `${area.name} ${s.name}`, reload);
   };
   $('#d-short').onclick = () => {
     if (!text.value.trim()) return toast('줄일 내용이 없습니다', true);
     delete text.dataset.dirty;
-    runAI('shorten', { student_id: s.id, text: text.value }, `${s.number}번 ${s.name}`, reload);
+    runAI('shorten', { student_id: s.id, text: text.value, area: area.id }, `${area.name} ${s.name}`, reload);
   };
   $('#d-copy').onclick = () => copyText(text.value);
   $('#d-save').onclick = async () => {
-    await api('/api/drafts/save', { student_id: s.id, content: text.value, status: '초안' });
+    await api('/api/drafts/save', { student_id: s.id, content: text.value, status: '초안', area: area.id });
     delete text.dataset.dirty; toast('저장했습니다'); reload();
   };
   $('#d-final').onclick = async () => {
     const same = current && current.content === text.value.trim();
-    await api('/api/drafts/save', { student_id: s.id, content: text.value, status: '확정', id: same ? current.id : null, as_new: !same });
+    await api('/api/drafts/save', { student_id: s.id, content: text.value, status: '확정', id: same ? current.id : null, as_new: !same, area: area.id });
     delete text.dataset.dirty; toast('확정했습니다'); reload();
   };
   $$('[data-ver]').forEach(el => {
-    const v = d.drafts.find(x => x.id === +el.dataset.ver);
+    const v = drafts.find(x => x.id === +el.dataset.ver);
     el.onclick = e => {
       if (e.target.classList.contains('v-del')) return;
       text.value = v.content; text.dataset.dirty = '1'; update(); toast('이 버전을 편집기에 불러왔습니다');
@@ -773,22 +813,24 @@ const FORBIDDEN = ['토익', 'TOEIC', '토플', 'TOEFL', '텝스', 'TEPS', 'HSK'
 
 // ───────────────────────── 세특 초안 (학급) ─────────────────────────
 
-async function viewDrafts(classId) {
+async function viewDrafts(classId, areaParam) {
   if (!classId) {
     if (state.classes.length) { location.replace('#/drafts/' + state.classes[0].id); return; }
     view.innerHTML = `<div class="empty card"><h2>학급이 없습니다</h2><a href="#/classes">학급 만들기 →</a></div>`;
     return;
   }
-  const [d, settings] = await Promise.all([api('/api/classes/' + classId), api('/api/settings')]);
-  const c = d.class, limit = d.byte_limit;
-  const withNotes = d.students.filter(s => s.notes).length;
-  const missing = d.students.filter(s => s.notes && !s.draft_status).length;
+  const [d, settings] = await Promise.all([api('/api/classes/' + classId + (areaParam ? '?area=' + areaParam : '')), api('/api/settings')]);
+  const c = d.class, limit = d.byte_limit, areas = d.areas, area = areas.find(a => a.id === d.area);
+  const withNotes = d.students.filter(s => s.area_notes).length;
+  const missing = d.students.filter(s => s.area_notes && !s.draft_status).length;
+  const done = d.students.filter(s => s.draft_status === '확정').length;
   const isApi = settings.mode === 'api' && settings.has_key;
   view.innerHTML = `
-    <div class="page-head"><div><h1>세특 초안</h1><div class="muted">학급 전체의 초안을 만들고 구글시트·엑셀로 내보냅니다.</div></div>
+    <div class="page-head"><div><h1>초안</h1><div class="muted">학급 전체의 초안을 만들고 구글시트·엑셀로 내보냅니다.</div></div>
       <div class="actions"><select id="dc" style="width:auto">${classOptions(classId)}</select></div></div>
+    ${areas.length > 1 ? `<div class="tabs">${areas.map(a => `<button class="${a.id === area.id ? 'on' : ''}" data-area="${a.id}">${esc(a.name)}</button>`).join('')}</div>` : ''}
     <div class="card">
-      <div class="section-title"><h2>${esc(c.label)} · ${d.students.length}명</h2>
+      <div class="section-title"><h2>${esc(c.label)} · ${esc(area.full)} <span class="muted small">확정 ${done}/${d.students.length}</span></h2>
         <span class="actions" style="display:flex;gap:6px;flex-wrap:wrap">
           <button id="g-missing" ${isApi && missing ? '' : 'disabled'} title="${isApi ? '' : 'API 모드에서만 일괄 생성할 수 있습니다'}">초안 없는 학생 생성 (${missing})</button>
           <button id="g-all" ${isApi && withNotes ? '' : 'disabled'}>기록 있는 학생 전체 생성 (${withNotes})</button>
@@ -796,24 +838,25 @@ async function viewDrafts(classId) {
           <button id="x-csv">CSV</button>
           <button id="x-xlsx">엑셀로 저장</button>
           <button class="primary" id="x-sheet">구글시트 지금 반영</button></span></div>
-      ${isApi ? '' : '<p class="help">수동 모드에서는 학생 이름을 눌러 한 명씩 초안을 만드세요.</p>'}
+      ${isApi ? '' : '<p class="help">API 키 없이 쓸 때는 학생 이름을 눌러 한 명씩 만들거나, 왼쪽 <a href="#/prompts">프롬프트 안내</a>대로 Gemini·ChatGPT 웹에서 만드세요.</p>'}
       <div class="table-wrap" style="margin-top:8px"><table>
-        <thead><tr><th style="width:50px">번호</th><th style="width:90px">이름</th><th class="right" style="width:60px">기록</th><th>세특 초안</th><th class="right" style="width:90px">바이트</th><th style="width:70px">상태</th></tr></thead>
-        <tbody>${d.students.map(s => `<tr class="clickable" data-href="#/student/${s.id}">
+        <thead><tr><th style="width:60px">${c.kind === '동아리' ? '학번' : '번호'}</th><th style="width:90px">이름</th><th class="right" style="width:60px">기록</th><th>초안</th><th class="right" style="width:90px">바이트</th><th style="width:70px">상태</th></tr></thead>
+        <tbody>${d.students.map(s => `<tr class="clickable" data-href="#/student/${s.id}${areas.length > 1 ? '/' + area.id : ''}">
           <td class="num">${s.number ?? ''}</td><td><b>${esc(s.name)}</b></td>
-          <td class="num">${s.notes ? s.notes : '<span class="badge red">0</span>'}</td>
+          <td class="num">${s.area_notes ? s.area_notes : '<span class="badge red">0</span>'}</td>
           <td class="small">${s.draft ? esc(s.draft.length > 140 ? s.draft.slice(0, 140) + '…' : s.draft) : '<span class="muted">-</span>'}</td>
           <td class="num ${s.draft_bytes > limit ? 'counter over' : ''}">${s.draft_bytes ? s.draft_bytes.toLocaleString() : ''}</td>
           <td>${s.draft_status ? `<span class="badge ${s.draft_status === '확정' ? 'green' : 'blue'}">${s.draft_status}</span>` : ''}</td></tr>`).join('')}
         </tbody></table></div>
-      <p class="help">구글시트를 연결해 두면 자동으로 반영됩니다. '표 복사' 후 시트나 엑셀 빈 칸에 붙여넣으면 번호·이름·기록수·초안·바이트·상태가 들어갑니다. 확정본이 있으면 확정본을, 없으면 최신 초안을 내보냅니다.</p>
+      <p class="help">한도 ${limit.toLocaleString()}바이트 (설정에서 영역별로 바꿀 수 있음). 구글시트를 연결해 두면 자동으로 반영됩니다. 내보낼 때는 확정본이 있으면 확정본을, 없으면 최신 초안을 씁니다.</p>
     </div>`;
   bindRowLinks();
+  $$('[data-area]').forEach(b => b.onclick = () => { location.hash = `#/drafts/${c.id}/${b.dataset.area}`; });
   $('#dc').onchange = e => { location.hash = '#/drafts/' + e.target.value; };
   const batch = async onlyMissing => {
     const n = onlyMissing ? missing : withNotes;
-    if (!confirmBox(`${n}명의 초안을 AI로 생성합니다. 무료 등급은 분당 요청 수 제한이 있어 몇 분 걸릴 수 있습니다. 진행할까요?`)) return;
-    const r = await api('/api/drafts/batch', { class_id: c.id, only_missing: onlyMissing });
+    if (!confirmBox(`${n}명의 '${area.name}' 초안을 AI로 생성합니다. 무료 등급은 분당 요청 수 제한이 있어 몇 분 걸릴 수 있습니다. 진행할까요?`)) return;
+    const r = await api('/api/drafts/batch', { class_id: c.id, only_missing: onlyMissing, area: area.id });
     toast(`${r.count}명 초안 생성을 대기열에 넣었습니다`); pollJobs(true);
   };
   $('#g-missing').onclick = () => batch(true);
@@ -854,13 +897,17 @@ async function viewSettings(section) {
         <p class="help">기본값 gemini-2.5-flash. '연결 테스트'를 누르면 쓸 수 있는 모델 목록이 채워집니다. 지정 모델이 없어지면 자동으로 다른 flash 모델로 바뀝니다.</p>
       </div>
       <div class="card">
-        <h2>세특 작성 기준</h2>
+        <h2>작성 기준</h2>
         <div class="row">
-          <label class="field"><span>바이트 한도 (NEIS)</span><input id="byte_limit" type="number" value="${esc(s.byte_limit)}"></label>
           <label class="field"><span>학교급</span><select id="school_level">${['고등학교', '중학교', '초등학교'].map(x => `<option ${x === s.school_level ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
           <label class="field"><span>기본 과목</span><input id="teacher_subject" value="${esc(s.teacher_subject)}" placeholder="학급에 과목이 없을 때 사용"></label>
+          <label class="field"><span>선생님 이름 (휴대폰 앱에 표시)</span><input id="teacher_name" value="${esc(s.teacher_name)}" placeholder="예: 김인회"></label>
         </div>
-        <p class="help">교과 세특 기본 500자 = 1,500바이트 (한글 3B, 영문·숫자·공백 1B, 줄바꿈 2B)</p>
+        <h3 style="margin-top:14px">영역별 NEIS 바이트 한도</h3>
+        <div class="table-wrap"><table><tbody>${s.areas.map(a => `<tr><td>${esc(a.full)}</td>
+          <td style="width:120px"><input type="number" class="area-limit" data-area="${a.id}" value="${a.limit}" style="padding:4px 8px"></td>
+          <td class="small muted" style="width:90px">≈ ${Math.round(a.limit / 3)}자</td></tr>`).join('')}</tbody></table></div>
+        <p class="help">한글 3바이트, 영문·숫자·공백 1바이트, 줄바꿈 2바이트. 기재요령은 학년도·학교급마다 다를 수 있으니 우리 학교 기준에 맞게 고치세요.</p>
         <label class="field" style="margin-top:12px"><span>추가 작성 지침</span>
           <textarea id="draft_guidance" rows="4" placeholder="예: 성취기준과 연결해서 쓰기, 마지막 문장은 성장 가능성으로 마무리">${esc(s.draft_guidance)}</textarea></label>
         <label class="field" style="margin-top:12px"><span>내 문체 예시 (예전에 쓴 세특 2~3개 붙여넣기)</span>
@@ -910,6 +957,16 @@ async function viewSettings(section) {
           </div>
         </div>
       </div>
+      <div class="card" style="grid-column:1 / -1" id="phone">
+        <div class="section-title"><h2>📱 휴대폰 '세특 녹음' 앱 연결</h2><label class="check"><input type="checkbox" id="drive_inbox" ${s.drive_inbox === '1' ? 'checked' : ''}> 휴대폰 녹음 자동으로 가져오기</label></div>
+        <div class="split">
+          <div class="info-box"><b>아이폰</b> — App Store에서 <b>세특 녹음</b> 설치 → 녹음하면 <b>iCloud로 자동 연동</b> (같은 Apple ID면 설정 없음)${s.platform === 'win' ? '<br><span class="small muted">윈도우 PC는 iCloud for Windows가 설치돼 있어야 합니다. 없으면 아래 구글 연결을 쓰세요.</span>' : ''}
+            <br><br><b>안드로이드(갤럭시) · 아이폰 공통</b> — Play 스토어/App Store에서 <b>세특 녹음</b> 설치 → 앱의 <b>컴퓨터 연결</b> → 오른쪽 QR 찍기 → 녹음이 <b>내 구글 드라이브</b>를 거쳐 이 컴퓨터로 자동 전송
+            <p class="small muted" style="margin:6px 0 0">QR에는 '녹음 올리기'만 가능한 전용 열쇠가 들어 있습니다. 휴대폰을 잃어버려도 기록을 볼 수는 없습니다. 구글 연결(위 카드)이 먼저 되어 있어야 합니다.</p></div>
+          <div style="text-align:center"><div id="qr-box" class="muted small">불러오는 중…</div>
+            <button class="sm" id="phone-scan" style="margin-top:8px">휴대폰 녹음 지금 가져오기</button></div>
+        </div>
+      </div>
       <div class="card" style="grid-column:1 / -1" id="backup-card">
         <div class="section-title"><h2>백업 · 복원 · 엑셀</h2>
           <span style="display:flex;gap:6px;flex-wrap:wrap"><button id="backup">지금 백업 (이 맥)</button><button id="xlsx-all" class="primary">전체 엑셀로 저장</button></span></div>
@@ -934,7 +991,8 @@ async function viewSettings(section) {
   const collect = () => ({
     mode: ($('input[name=mode]:checked') || {}).value || 'api',
     gemini_api_key: $('#key').value, gemini_model: $('#model').value.trim(),
-    byte_limit: $('#byte_limit').value, school_level: $('#school_level').value, teacher_subject: $('#teacher_subject').value,
+    area_limits: JSON.stringify(Object.fromEntries($$('.area-limit').map(i => [i.dataset.area, +i.value || 0]))),
+    byte_limit: ($('.area-limit[data-area=subject]') || {}).value || s.byte_limit, school_level: $('#school_level').value, teacher_subject: $('#teacher_subject').value,
     draft_guidance: $('#draft_guidance').value, style_examples: $('#style_examples').value,
     auto_process: $('#auto_process').checked ? '1' : '0',
     sheets_url: $('#sheets_url').value.trim(),
@@ -942,6 +1000,7 @@ async function viewSettings(section) {
     stt_engine: ($('input[name=stt_engine]:checked') || {}).value || 'whisper',
     period_times: $('#period_times').value, timetable: JSON.stringify(timetable),
     update_check: $('#update_check').checked ? '1' : '0',
+    drive_inbox: $('#drive_inbox').checked ? '1' : '0', teacher_name: $('#teacher_name').value.trim(),
   });
   const save = async () => { await api('/api/settings', collect()); };
   $('#save').onclick = async () => { await save(); toast('설정을 저장했습니다'); updateModeBadge(); router(true); };
@@ -976,7 +1035,9 @@ async function viewSettings(section) {
     const r = await api('/api/restore/upload', f);
     toast(`복원했습니다 — 학급 ${r.counts.classes}, 학생 ${r.counts.students}, 기록 ${r.counts.notes}`); router(true);
   };
-  renderWhisper(); renderGoogle(); renderBackups();
+  renderWhisper(); renderGoogle(); renderBackups(); renderPairing();
+  $('#phone-scan').onclick = async () => { const r = await api('/api/phone/scan', {}); toast(`휴대폰 녹음 ${r.imported}개를 가져왔습니다`); };
+  if (s.platform !== 'mac') $$('[data-maconly]').forEach(e => e.classList.add('hidden'));
 
   // 시간표
   let timetable = {};
@@ -1015,6 +1076,15 @@ async function viewSettings(section) {
   };
   showUpd(false);
   $('#upd-check').onclick = () => showUpd(true);
+}
+
+async function renderPairing() {
+  const box = $('#qr-box'); if (!box) return;
+  const p = await api('/api/phone/pairing', undefined, { silent: true }).catch(() => null);
+  if (!p || !p.ready) { box.innerHTML = '<div class="warn" style="text-align:left">먼저 위의 <b>구글시트 자동 반영 · 드라이브 백업</b>을 연결하세요. 연결하면 여기에 QR이 나타납니다.</div>'; return; }
+  const qr = qrcode(0, 'M'); qr.addData(p.payload); qr.make();
+  box.innerHTML = `<div style="background:#fff;display:inline-block;padding:10px;border-radius:10px">${qr.createSvgTag({ cellSize: 5, margin: 2 })}</div>
+    <div class="small muted" style="margin-top:6px">휴대폰 '세특 녹음' 앱 → 컴퓨터 연결 → QR 찍기</div>`;
 }
 
 async function renderGoogle() {
@@ -1106,7 +1176,8 @@ async function renderSources() {
   const appName = src.app_name;
   const vmState = !vm.enabled ? '' : vm.access === 'ok' ? '<span class="badge green">작동 중</span>'
     : vm.access === 'no_permission' ? '<span class="badge red">권한 필요</span>' : '<span class="badge amber">음성메모 보관함 없음</span>';
-  box.innerHTML = `
+  const mac = (state.settings || {}).platform !== 'win' && (state.settings || {}).platform !== 'other';
+  box.innerHTML = (mac ? `
     <div class="source">
       <div class="source-head"><h3>① 음성메모 자동 가져오기 <span class="badge blue">가장 편함</span> ${vmState}</h3>
         <label class="switch"><input type="checkbox" id="vm-on" ${vm.enabled ? 'checked' : ''}> 사용</label></div>
@@ -1138,6 +1209,7 @@ async function renderSources() {
         <li>위 <b>사용</b> 체크 → "메모를 제어하려고 합니다" 창이 뜨면 <b>허용</b></li>
         <li>사용 팁: 메모 제목에 <b>2-3</b> 같은 학급을 쓰거나, 시간표를 채워 두면 학급이 자동 지정됩니다</li></ol></details>
     </div>
+` : '<p class="muted small">아이폰 음성메모·메모 앱 자동 가져오기는 맥에서만 됩니다. 윈도우에서는 휴대폰 \'세특 녹음\' 앱(아래)이나 iCloud 폴더를 쓰세요.</p>') + `
     <div class="source">
       <div class="source-head"><h3>③ iCloud '세특녹음' 폴더 / 단축어 ${src.inbox.exists ? '<span class="badge green">작동 중</span>' : ''}</h3>
         <button class="sm" id="inbox-open">${src.inbox.exists ? 'Finder에서 열기' : '폴더 만들기'}</button></div>
@@ -1149,6 +1221,7 @@ async function renderSources() {
     if ($('#vm-on').checked && r.access === 'no_permission') toast('전체 디스크 접근 권한이 필요합니다. 안내를 따라 주세요.', true);
     renderSources();
   };
+  if (!mac) { $('#inbox-open').onclick = async () => { await api('/api/inbox/create', {}); renderSources(); }; return; }
   $('#vm-on').onchange = () => setVM();
   if ($('#vm-perm')) $('#vm-perm').onclick = () => api('/api/open_privacy', { pane: 'fda' });
   if ($('#vm-save')) $('#vm-save').onclick = () => setVM({ since: $('#vm-since').value, keyword: $('#vm-kw').value }).then(() => toast('적용했습니다'));
@@ -1225,6 +1298,90 @@ async function viewPrompts() {
   $$('.p-copy').forEach(b => b.onclick = () => copyText(d.templates[+b.dataset.i].prompt));
 }
 
+// ───────────────────────── 첫 실행 안내 ─────────────────────────
+
+async function maybeOnboard() {
+  const s = await api('/api/settings', undefined, { silent: true }).catch(() => null);
+  if (!s || s.onboarded === '1') return;
+  await loadClasses();
+  if (state.classes.length) { api('/api/settings', { onboarded: '1' }); return; }
+  showOnboarding(s);
+}
+
+function showOnboarding(s) {
+  const y = new Date().getFullYear(), sem = (new Date().getMonth() + 1) >= 8 ? 2 : 1;
+  const st = { step: 1 };
+  const steps = {
+    1: () => `<h2>👋 세특도우미에 오신 것을 환영합니다</h2>
+      <p class="muted">수업·상담 중 말로 남긴 관찰을 학생별로 모아, 학기말 세특·행동특성·창체 초안을 빠르게 만드는 도구입니다. 1분이면 준비됩니다.</p>
+      <div class="row" style="margin-top:12px">
+        <label class="field"><span>학교급</span><select id="ob-level">${['고등학교', '중학교', '초등학교'].map(x => `<option ${x === s.school_level ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+        <label class="field"><span>선생님 이름 (선택)</span><input id="ob-name" value="${esc(s.teacher_name || '')}" placeholder="예: 김인회"></label>
+      </div>`,
+    2: () => `<h2>어떤 기록을 쓰시나요?</h2><p class="muted">해당하는 것을 모두 고르세요. 학급이 자동으로 만들어집니다. (나중에 학급·학생 메뉴에서 더 추가 가능)</p>
+      <div class="source"><label class="check"><input type="checkbox" id="ob-subj-on" checked> <b>교과 세특</b> — 수업하는 반</label>
+        <div class="row" style="margin-top:8px"><label class="field"><span>과목</span><input id="ob-subj" value="${esc(s.teacher_subject || '')}" placeholder="예: 국어"></label>
+          <label class="field" style="flex:2"><span>수업하는 반 (쉼표로)</span><input id="ob-classes" placeholder="예: 2-1, 2-3, 2-5"></label></div></div>
+      <div class="source"><label class="check"><input type="checkbox" id="ob-home-on"> <b>담임</b> — 행동특성 및 종합의견 · 자율·자치 · 진로 · 개인별 세특</label>
+        <div class="row" style="margin-top:8px"><label class="field"><span>담임 학급</span><input id="ob-home" placeholder="예: 2-3"></label><span></span></div></div>
+      <div class="source"><label class="check"><input type="checkbox" id="ob-club-on"> <b>동아리</b> — 동아리활동 특기사항</label>
+        <div class="row" style="margin-top:8px"><label class="field"><span>동아리 이름</span><input id="ob-club" placeholder="예: 로봇탐구반"></label><span></span></div></div>`,
+    3: () => `<h2>🎙 녹음을 글자로 바꾸는 방법</h2>
+      <p class="muted">녹음을 <b>이 컴퓨터 안에서</b> 글자로 바꾸는 Whisper 모델(550MB)을 받아 두면, 녹음이 외부로 나가지 않고 비용도 없습니다.</p>
+      <div id="ob-wh"></div>`,
+    4: () => `<h2>✨ 초안을 만드는 AI</h2>
+      <p class="muted">세특 초안 문장은 AI가 써 줍니다. 둘 중 편한 방법을 고르세요. 나중에 설정에서 바꿀 수 있습니다.</p>
+      <div class="source"><label class="check"><input type="radio" name="ob-ai" value="manual" checked> <b>지금 쓰는 Gemini·ChatGPT 웹에 복사·붙여넣기</b> (키 필요 없음)</label>
+        <p class="small muted">버튼을 누르면 학생 기록이 담긴 문구가 만들어지고, 웹 채팅에 붙여넣은 뒤 답을 다시 붙여넣습니다. '프롬프트 안내' 메뉴에 방법이 있습니다.</p></div>
+      <div class="source"><label class="check"><input type="radio" name="ob-ai" value="api"> <b>Gemini API 키로 자동</b> (무료 키, 학급 전체 한 번에 생성 가능)</label>
+        <p class="small muted"><a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a>에서 '키 만들기' → 복사해서 붙여넣기</p>
+        <input id="ob-key" type="password" placeholder="AIza로 시작하는 키 (선택)"></div>`,
+  };
+  const render = () => {
+    modal(`<div class="small muted" style="margin-bottom:6px">${st.step} / 4</div>${steps[st.step]()}
+      <div class="modal-actions">${st.step > 1 ? '<button id="ob-back">이전</button>' : '<button id="ob-skip" class="ghost">건너뛰기</button>'}
+        <button class="primary" id="ob-next">${st.step === 4 ? '시작하기' : '다음'}</button></div>`, box => {
+      if (st.step === 3) whisperBanner($('#ob-wh', box)).then(() => { if (!$('#ob-wh', box).innerHTML) $('#ob-wh', box).innerHTML = '<p class="ok-text">✓ 받아쓰기 준비됨 (또는 이 컴퓨터는 Gemini 받아쓰기를 사용)</p>'; });
+      if ($('#ob-skip', box)) $('#ob-skip', box).onclick = async () => { await api('/api/settings', { onboarded: '1' }); closeModal(); };
+      if ($('#ob-back', box)) $('#ob-back', box).onclick = () => { st.step--; render(); };
+      $('#ob-next', box).onclick = async () => {
+        if (st.step === 1) { st.level = $('#ob-level', box).value; st.name = $('#ob-name', box).value.trim(); }
+        if (st.step === 2) {
+          const mk = [];
+          if ($('#ob-subj-on', box).checked) {
+            const subj = $('#ob-subj', box).value.trim();
+            ($('#ob-classes', box).value.match(/\d+\s*-\s*\d+/g) || []).forEach(x => { const [g, c] = x.split('-').map(v => +v.trim()); mk.push({ kind: '교과', grade: g, class_no: c, subject: subj }); });
+            st.subject = subj;
+          }
+          if ($('#ob-home-on', box).checked) {
+            const m = $('#ob-home', box).value.match(/(\d+)\s*-\s*(\d+)/);
+            if (m) mk.push({ kind: '담임', grade: +m[1], class_no: +m[2] });
+          }
+          if ($('#ob-club-on', box).checked && $('#ob-club', box).value.trim()) mk.push({ kind: '동아리', subject: $('#ob-club', box).value.trim() });
+          if (!mk.length) return toast('학급을 하나 이상 입력하세요 (예: 2-3)', true);
+          st.make = mk;
+        }
+        if (st.step === 4) {
+          const ai = ($('input[name=ob-ai]:checked', box) || {}).value;
+          const key = $('#ob-key', box).value.trim();
+          const vals = { onboarded: '1', school_level: st.level, teacher_name: st.name || '', teacher_subject: st.subject || '',
+            mode: ai === 'api' && key ? 'api' : 'manual' };
+          if (key) vals.gemini_api_key = key;
+          await api('/api/settings', vals);
+          for (const c of st.make) await api('/api/classes/save', Object.assign({ year: y, semester: sem }, c));
+          closeModal(); updateModeBadge();
+          toast('준비됐습니다! 각 학급에 학생 명단을 붙여넣으세요.');
+          await loadClasses();
+          location.hash = state.classes.length ? '#/class/' + state.classes[0].id : '#/classes';
+          return;
+        }
+        st.step++; render();
+      };
+    });
+  };
+  render();
+}
+
 async function updateModeBadge() {
   const s = await api('/api/settings', undefined, { silent: true }).catch(() => null);
   if (!s) return;
@@ -1262,6 +1419,7 @@ window.addEventListener('drop', e => e.preventDefault());
 
 updateModeBadge();
 checkUpdateBanner();
+maybeOnboard();
 updatePending();
 setInterval(updatePending, 30000);
 router(false);

@@ -41,7 +41,7 @@ def transcribe(kind, class_label, students):
 """ % ("학교", context, class_label or "미지정", roster_text(students))
 
 
-SEGMENT_SYSTEM = "너는 한국 고등학교 교사의 학생 관찰기록을 정리하는 조수다. 반드시 지시된 JSON만 출력한다."
+SEGMENT_SYSTEM = "너는 한국 학교 교사의 학생 관찰기록을 정리하는 조수다. 반드시 지시된 JSON만 출력한다."
 
 
 def segment(kind, class_label, students, transcript, date):
@@ -74,13 +74,37 @@ def segment(kind, class_label, students, transcript, date):
 """ % (kind, date or "", kind, class_label or "미지정", roster_text(students), transcript)
 
 
-DRAFT_SYSTEM = "너는 한국 학교생활기록부 교과 세부능력 및 특기사항(세특) 작성을 돕는 전문 조수다."
+DRAFT_SYSTEM = "너는 한국 학교생활기록부(세특·행동특성·창의적 체험활동) 작성을 돕는 전문 조수다."
+
+# 영역별 작성 지침 — 학교생활기록부 기재요령의 일반 원칙을 요약
+AREA_GUIDE = {
+    "subject": ("%(subject)s 과목 '세부능력 및 특기사항'",
+                "- 수업 중 활동(발표·토론·탐구·과제·질문)에서 드러난 학업 역량, 과목에 대한 이해와 사고 과정을 중심으로.\n"
+                "- 구체적 활동(무엇을 했는지) → 과정에서 드러난 태도·사고 → 역량·성장 순으로 연결."),
+    "individual": ("'개인별 세부능력 및 특기사항'",
+                   "- 교과 수업 밖에서 드러난 개인의 학업 관련 특기사항(자기주도 학습, 탐구, 학업 태도)을 중심으로."),
+    "behavior": ("'행동특성 및 종합의견'",
+                 "- 담임교사가 1년간 관찰한 학생의 인성·태도·공동체 역량·자기관리·성장 과정을 종합적으로.\n"
+                 "- 구체적 사례를 근거로 쓰고, 부족한 점은 노력과 변화 가능성 중심으로 긍정적으로 서술.\n"
+                 "- 학생을 한 사람으로 그려 내듯 전체를 아우르는 종합 의견으로 마무리."),
+    "autonomy": ("창의적 체험활동 '자율·자치활동 특기사항'",
+                 "- 학급 회의, 학생 자치, 학교 행사 등에서 맡은 역할과 참여 과정, 기여, 그 속에서 드러난 공동체 역량을 중심으로."),
+    "career": ("창의적 체험활동 '진로활동 특기사항'",
+               "- 진로 탐색 활동, 관심 분야를 깊이 알아보는 과정, 활동 후 생각의 변화와 진로 성숙을 중심으로.\n"
+               "- 특정 대학·학과명은 쓰지 말 것."),
+    "club": ("창의적 체험활동 '동아리활동 특기사항'%(club)s",
+             "- 동아리 활동에서 맡은 역할, 참여 과정, 결과물, 협업과 기여, 드러난 역량을 중심으로.\n"
+             "- 동아리 이름은 별도 칸에 적히므로 본문에 반복하지 말 것."),
+}
 
 
-def draft(student, class_info, notes, settings, extra=""):
-    limit = int(settings.get("byte_limit") or 1500)
+def draft(student, class_info, notes, settings, extra="", area="subject"):
+    import db
+    limit = db.area_limit(area, settings)
     approx_chars = int(limit / 3 * 0.95)
     subject = (class_info.get("subject") or settings.get("teacher_subject") or "해당 교과")
+    title_t, guide_t = AREA_GUIDE.get(area, AREA_GUIDE["subject"])
+    title = title_t % {"subject": subject, "club": (" (동아리: %s)" % class_info["subject"]) if class_info.get("subject") else ""}
     note_lines = []
     for n in notes:
         tag = "[%s/%s%s]" % (n.get("date") or "날짜미상", n.get("kind") or "",
@@ -91,18 +115,21 @@ def draft(student, class_info, notes, settings, extra=""):
         note_lines.append("- " + line)
     style = (settings.get("style_examples") or "").strip()
     guidance = (settings.get("draft_guidance") or "").strip()
-    out = """%s %s 과목 학교생활기록부 '세부능력 및 특기사항' 초안을 작성해 주세요.
+    grade = ("%s학년 " % class_info["grade"]) if class_info.get("grade") else ""
+    out = """%s학교생활기록부 %s 초안을 작성해 주세요.
+
+[이 영역의 초점]
+%s
 
 [작성 원칙]
 - 아래 교사의 관찰기록에 있는 사실만 근거로 작성. 기록에 없는 활동·성과·역량을 지어내지 말 것.
-- 구체적 활동(무엇을 했는지) → 과정에서 드러난 태도·사고 → 역량·성장 순으로 자연스럽게 연결.
 - 문장은 '~함', '~임', '~보임', '~돋보임' 등 명사형 종결. 학생 이름이나 '학생은'이라는 주어를 쓰지 말 것.
 - 막연한 칭찬어(성실함, 우수함)만 나열하지 말고 관찰된 근거와 함께 서술.
-- 상담 기록은 학업·진로와 관련된 내용만 활용하고, 가정사·건강·교우관계 등 민감한 개인사는 쓰지 말 것.
+- 상담 기록은 학업·진로·성장과 관련된 내용만 활용하고, 가정사·건강·교우 갈등 등 민감한 개인사는 쓰지 말 것.
 - 기재 금지: 교외 대회·수상, 공인어학시험 점수, 논문·학회, 특허, 도서 출간, 해외 활동, 부모의 직업·사회경제적 지위, 사교육, 특정 대학·기관·상호명.
 - 분량: NEIS 기준 %d바이트 이내(한글 약 %d자 이내), 한 문단. 줄바꿈 없이.
-- 머리말·설명·따옴표 없이 세특 본문만 출력.
-""" % (("%s학년" % class_info["grade"]) if class_info.get("grade") else "", subject, limit, approx_chars)
+- 머리말·설명·따옴표 없이 본문만 출력.
+""" % (grade, title, guide_t, limit, approx_chars)
     if guidance:
         out += "\n[교사의 추가 지침]\n%s\n" % guidance
     if style:
@@ -139,14 +166,16 @@ def check_forbidden(text):
 
 def gem_instructions(settings):
     limit = int(settings.get("byte_limit") or 1500)
-    return """너는 한국 %s 교사의 학교생활기록부 '교과 세부능력 및 특기사항(세특)' 작성을 돕는 조수다.
+    return """너는 한국 %s 교사의 학교생활기록부 작성(교과 세특, 행동특성 및 종합의견, 자율·자치·동아리·진로활동 특기사항)을 돕는 조수다.
 
 [내가 주는 것]
 - 수업 중 학생들을 관찰하며 말한 녹음의 전사문, 또는 학생별로 정리된 관찰기록
 
 [네가 하는 일]
 1. 전사문을 주면: 학생 이름이 언급된 곳을 기준으로 학생별 관찰 내용을 나눈다. 명단을 주면 명단과 대조하고, 명단에 없는 이름은 따로 표시한다.
-2. 한 학생의 관찰기록을 주면: 세특 초안을 쓴다.
+2. 한 학생의 관찰기록과 영역(예: 교과 세특, 행동특성, 동아리)을 주면: 그 영역에 맞는 초안을 쓴다.
+   - 교과 세특: 수업 중 학업 역량과 사고 과정 / 행동특성: 인성·태도·공동체 역량·성장의 종합 의견
+   - 자율·자치: 맡은 역할과 공동체 기여 / 동아리: 역할·과정·결과물·협업 / 진로: 탐색 과정과 진로 성숙
 3. "줄여줘"라고 하면: 같은 내용을 더 짧게 다듬는다.
 
 [세특 작성 원칙]
@@ -156,7 +185,7 @@ def gem_instructions(settings):
 - 막연한 칭찬(성실함, 우수함)만 나열하지 말고 관찰된 근거와 함께 쓴다.
 - 상담 내용은 학업·진로 관련만 쓰고 가정사·건강·교우관계 등 민감한 개인사는 쓰지 않는다.
 - 기재 금지: 교외 대회·수상, 공인어학시험, 논문·학회, 특허, 도서 출간, 해외 활동, 부모 직업·사회경제적 지위, 사교육, 특정 대학·기관·상호명.
-- 분량: NEIS 기준 %d바이트 이내(한글 약 %d자), 한 문단, 줄바꿈 없이.
+- 분량: 교과 세특은 NEIS 기준 %d바이트 이내(한글 약 %d자). 다른 영역은 내가 알려주는 분량을 따른다. 한 문단, 줄바꿈 없이.
 - 결과는 머리말·설명 없이 본문만 준다.%s""" % (
         settings.get("school_level") or "고등학교", limit, int(limit / 3 * 0.95),
         ("\n\n[교사의 추가 지침]\n" + settings["draft_guidance"].strip()) if (settings.get("draft_guidance") or "").strip() else "")

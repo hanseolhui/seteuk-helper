@@ -31,6 +31,8 @@ VOICEMEMO_DIRS = [
 ]
 # 아이폰 '세특 녹음/받아쓰기' 단축어가 저장하는 곳 (iCloud Drive › Shortcuts › 세특녹음)
 SHORTCUTS_DIR = "~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/세특녹음"
+# 아이폰 '세특 녹음' 앱이 iCloud에 저장하는 곳 (같은 Apple ID면 자동 동기화)
+RECORDER_CONTAINER = "iCloud~kr~seteuk~recorder"
 _status = {"inbox": "", "voicememo": "", "notes": ""}
 _seen_sizes = {}
 _scan_lock = threading.Lock()
@@ -168,7 +170,8 @@ def _runs_text(payload):
 def inbox_dirs():
     settings = db.get_settings()
     dirs = []
-    for d in (settings.get("inbox_dir") or "", SHORTCUTS_DIR):
+    import platform_util
+    for d in (settings.get("inbox_dir") or "", SHORTCUTS_DIR, platform_util.icloud_container_dir(RECORDER_CONTAINER)):
         d = os.path.expanduser(d)
         if d and os.path.isdir(d) and d not in dirs:
             dirs.append(d)
