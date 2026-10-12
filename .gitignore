@@ -7,3 +7,11 @@ __pycache__/
 .DS_Store
 *.zip
 .claude/
+
+mobile/ios/*.xcodeproj/xcuserdata/
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/local.properties
+*.keystore
+*.jks

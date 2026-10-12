@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""세특도우미 로컬 서버. 실행: python3 app/server.py"""
+"""쓰담 로컬 서버. 실행: python3 app/server.py"""
 import datetime
 import json
 import mimetypes
@@ -770,7 +770,7 @@ def phone_pairing(h, q, b):
     s = db.get_settings()
     if not s.get("sheets_url"):
         return {"ready": False}
-    payload = "seteuk://pair?" + urllib.parse.urlencode({"u": s["sheets_url"], "t": ensure_upload_token(),
+    payload = "sseudam://pair?" + urllib.parse.urlencode({"u": s["sheets_url"], "t": ensure_upload_token(),
                                                          "n": s.get("teacher_name") or ""})
     return {"ready": True, "payload": payload}
 
@@ -899,7 +899,7 @@ def sources_status(h, q, b):
                       "count": counts.get("voicememo", 0)},
         "notes": {"enabled": s["notes_enabled"] == "1", "folder": s["notes_folder"], "count": counts.get("notes", 0)},
         "status": watcher.status(),
-        "app_name": "세특도우미" if os.environ.get("SETEUK_APP") else "터미널",
+        "app_name": "쓰담" if os.environ.get("SETEUK_APP") else "터미널",
     }
 
 
@@ -1142,7 +1142,7 @@ def main():
     watcher.start()
     sheets.start()
     url = "http://%s:%d" % (HOST, PORT)
-    print("세특도우미 %s 실행 중: %s  (코드: %s, 데이터: %s)" % (version.VERSION, url, db.APP_DIR, db.DATA_DIR))
+    print("쓰담 %s 실행 중: %s  (코드: %s, 데이터: %s)" % (version.VERSION, url, db.APP_DIR, db.DATA_DIR))
     if os.environ.get("SETEUK_NO_BROWSER") != "1":
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:

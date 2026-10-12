@@ -1,4 +1,4 @@
-# 세특도우미 — 구조 설계
+# 쓰담 — 구조 설계
 
 ## 0. 설계 원칙 (납품 조건에서 나온 제약)
 
@@ -16,10 +16,10 @@
 ## 1. 전체 흐름
 
 ```
-[아이폰]                                  [맥 — 세특도우미.app (백그라운드 로컬 서버)]
+[아이폰]                                  [맥 — 쓰담.app (백그라운드 로컬 서버)]
  음성메모 녹음 ──iCloud──▶ 음성메모 보관함 ─┐   (전체 디스크 접근 권한, 내장 전사문 있으면 사용)
  메모 앱 받아쓰기 ─iCloud─▶ 메모 앱 '세특' ─┼─▶ ① 보관  data/audio/YYYY/MM/…  + DB
- 단축어/파일 저장 ─iCloud─▶ 세특녹음 폴더 ──┤      학급 지정: 제목·파일명(2-3) → 시간표(녹음 시각) → AI가 본문에서
+ 단축어/파일 저장 ─iCloud─▶ 쓰담 녹음 폴더 ──┤      학급 지정: 제목·파일명(2-3) → 시간표(녹음 시각) → AI가 본문에서
  드래그&드롭 / 전사문 붙여넣기 ────────────┘
                                               ▼
                                     ② 전사(STT)  아이폰 전사문 / 메모 텍스트면 생략, 아니면 내 맥 Whisper(기본·외부 전송 없음) 또는 Gemini
@@ -38,7 +38,7 @@
 ## 2. 폴더 구조
 
 ```
-seteuk-helper/ (GitHub 저장소 = 코드만)
+sseudam/ (GitHub 저장소 = 코드만)
 ├─ app/                 ← 업데이트 단위 (seteuk-app.zip)
 │  ├─ server.py         HTTP 서버·API·정적파일·오디오(Range)
 │  ├─ db.py             SQLite, 데이터 위치, NEIS 바이트
@@ -53,13 +53,13 @@ seteuk-helper/ (GitHub 저장소 = 코드만)
 │  ├─ version.py        VERSION, UPDATE_REPO
 │  ├─ google_apps_script.gs
 │  └─ static/           index.html, app.js, style.css
-├─ macos/               SeteukApp.swift(네이티브 셸), start_server.sh, bin/whisper-cli, build_app.sh, icon
+├─ macos/               SseudamApp.swift(네이티브 셸), start_server.sh, bin/whisper-cli, build_app.sh, icon
 ├─ tools/build_shortcuts.py  아이폰 단축어 생성·서명 / tools/make_prompt_doc.py  프롬프트_모음.md
 ├─ tools/release.sh     버전업→빌드→태그·푸시→GitHub 릴리스
 ├─ install.sh           curl 한 줄 설치
 └─ 사용설명서.md · README.md · ARCHITECTURE.md
 
-~/Library/Application Support/세특도우미/   (사용자 맥 — 저장소에 올라가지 않음)
+~/Library/Application Support/쓰담/   (사용자 맥 — 저장소에 올라가지 않음)
 ├─ data/  seteuk.db, audio/, backups/
 ├─ code/<버전>/app/    앱 내 업데이트로 받은 코드 (최근 2개)
 └─ server.log
@@ -67,7 +67,7 @@ seteuk-helper/ (GitHub 저장소 = 코드만)
 
 ## 2-1. 설치·업데이트 구조
 
-- **세특도우미.app** (1.2~): `Contents/MacOS/SeteukHelper`(Swift 네이티브 셸, 유니버설) — 자기 창(WKWebView)·메뉴·Dock.
+- **쓰담.app** (1.2~): `Contents/MacOS/Sseudam`(Swift 네이티브 셸, 유니버설) — 자기 창(WKWebView)·메뉴·Dock.
   `Resources/start_server.sh`로 파이썬 서버를 자식 프로세스로 띄우고, 비정상 종료 시 재시작, ⌘Q 시 함께 종료.
   창을 닫아도 앱은 남아 아이폰 기록을 계속 받는다. 예전 버전 서버가 떠 있으면 끄고 새로 띄운다.
   `Resources/bin/whisper-cli`(whisper.cpp, Metal, 정적 링크) 포함.
@@ -128,7 +128,7 @@ API 모드와 수동 모드가 같은 코드를 공유합니다.
 | 위치 | 주기 | 내용 | 복원 |
 |---|---|---|---|
 | 이 맥 `data/backups` | 하루 1회(실행 시) + 업데이트·복원 직전 | DB 전체 | 설정 → 백업·복원 |
-| 구글 드라이브 '세특도우미 백업' | 하루 1회(연결 시) | DB zip, 최근 30개 | 설정 → 백업·복원 (앱이 드라이브에서 직접 받아옴) |
+| 구글 드라이브 '쓰담 백업' | 하루 1회(연결 시) | DB zip, 최근 30개 | 설정 → 백업·복원 (앱이 드라이브에서 직접 받아옴) |
 | 구글시트 | 바뀐 내용 5분 내 | 보기용 표(학급별 세특·관찰기록) | 수동 확인용 |
 
 Apps Script 요청은 앱이 자동 생성한 토큰으로 보호(스크립트 복사 시 토큰이 들어감). 오디오 원본은 맥에만 보관.

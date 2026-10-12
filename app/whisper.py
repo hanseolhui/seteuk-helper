@@ -2,7 +2,7 @@
 """내 맥에서 직접 받아쓰기 (whisper.cpp). 인터넷·API 키 없이 동작, 녹음이 맥 밖으로 나가지 않음.
 
 - 실행 파일: 앱 안(Resources/bin/whisper-cli) — Apple Silicon(M1 이상) 전용, Metal GPU 사용
-- 모델: 처음 한 번 설정 화면에서 내려받음 → ~/Library/Application Support/세특도우미/models
+- 모델: 처음 한 번 설정 화면에서 내려받음 → ~/Library/Application Support/쓰담/models
 """
 import os
 import platform
@@ -88,7 +88,7 @@ def status():
 def _fetch(url, dest, expected, key):
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     part = dest + ".part"
-    req = urllib.request.Request(url, headers={"User-Agent": "seteuk-helper"})
+    req = urllib.request.Request(url, headers={"User-Agent": "sseudam"})
     with urllib.request.urlopen(req, timeout=60, context=gemini._CTX) as resp, open(part, "wb") as f:
         total = int(resp.headers.get("Content-Length") or expected)
         if key:
@@ -170,7 +170,7 @@ def transcribe(audio_path, students=None, kind="수업", on_progress=None, model
         raise RuntimeError("Whisper 받아쓰기는 Apple Silicon(M1 이상) 맥에서만 됩니다.")
     exe = binary()
     if not exe:
-        raise RuntimeError("Whisper 실행 파일이 없습니다. 세특도우미를 최신 버전으로 다시 설치하세요.")
+        raise RuntimeError("Whisper 실행 파일이 없습니다. 쓰담을 최신 버전으로 다시 설치하세요.")
     mid = best_installed(model_id or db.get_settings().get("whisper_model"))
     if not mid:
         raise RuntimeError("Whisper 모델이 없습니다. 설정 → 받아쓰기 엔진에서 모델을 내려받으세요.")

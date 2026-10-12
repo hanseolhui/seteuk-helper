@@ -1,4 +1,4 @@
-// 세특도우미 macOS 앱 셸: 자체 창(WKWebView)으로 로컬 서버 화면을 띄우고, 서버 프로세스를 관리한다.
+// 쓰담 macOS 앱 셸: 자체 창(WKWebView)으로 로컬 서버 화면을 띄우고, 서버 프로세스를 관리한다.
 // 빌드: macos/build_app.sh (swiftc, 외부 의존성 없음)
 import Cocoa
 import WebKit
@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
     func applicationDidFinishLaunching(_ note: Notification) {
         buildMenu()
         buildWindow()
-        showLoading("세특도우미를 시작하는 중…")
+        showLoading("시작하는 중…")
         serverVersion { ver in
             guard let ver = ver else { self.startServer(); return }
             // 예전 버전 서버가 떠 있으면(앱을 새로 설치한 경우) 끄고 새로 시작
@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 840),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
-        window.title = "세특도우미"
+        window.title = "쓰담"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.minSize = NSSize(width: 900, height: 600)
@@ -88,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
     func showLoading(_ msg: String) {
         let html = """
         <html><body style="font:15px -apple-system;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;color:#6b7384;background:transparent">
-        <div style="text-align:center"><div style="font-size:22px;font-weight:700;color:#2f6fde;margin-bottom:8px">세특도우미</div>\(msg)</div></body></html>
+        <div style="text-align:center"><div style="font-size:24px;font-weight:800;color:#2f6fde;margin-bottom:6px">쓰담</div><div style="font-size:12px;margin-bottom:14px">말로 담고, 글로 씁니다</div>\(msg)</div></body></html>
         """
         webView.loadHTMLString(html, baseURL: nil)
     }
@@ -110,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         env["SETEUK_NO_BROWSER"] = "1"
         env["SETEUK_BIN"] = (Bundle.main.resourcePath ?? "") + "/bin"
         env["SETEUK_PORT"] = String(kPort)
-        env["SETEUK_SHELL"] = "2"
+        env["SETEUK_SHELL"] = "3"
         env["SETEUK_APP_PATH"] = Bundle.main.bundlePath
         p.environment = env
         p.terminationHandler = { [weak self] proc in
@@ -125,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         ping { alive in
             if alive { self.restarts = 0; self.loadApp(); return }
             if tries <= 0 {
-                self.fatal("서버가 응답하지 않습니다. 로그: ~/Library/Application Support/세특도우미/server.log"); return
+                self.fatal("서버가 응답하지 않습니다. 로그: ~/Library/Application Support/쓰담/server.log"); return
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.waitForServer(tries: tries - 1) }
         }
@@ -137,7 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         if status == 3 {  // python 없음 → 명령어 라인 도구 설치 안내
             let a = NSAlert()
             a.messageText = "처음 한 번만 설치가 필요합니다"
-            a.informativeText = "애플의 '명령어 라인 도구'가 필요합니다. [설치]를 누르면 설치 창이 뜹니다. 설치가 끝나면 세특도우미를 다시 실행하세요."
+            a.informativeText = "애플의 '명령어 라인 도구'가 필요합니다. [설치]를 누르면 설치 창이 뜹니다. 설치가 끝나면 쓰담을 다시 실행하세요."
             a.addButton(withTitle: "설치")
             a.addButton(withTitle: "종료")
             if a.runModal() == .alertFirstButtonReturn {
@@ -151,7 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         }
         // 비정상 종료 → 다시 시작 (최대 3회)
         restarts += 1
-        if restarts > 3 { fatal("서버가 반복해서 멈췄습니다. 로그를 확인해 주세요: ~/Library/Application Support/세특도우미/server.log"); return }
+        if restarts > 3 { fatal("서버가 반복해서 멈췄습니다. 로그를 확인해 주세요: ~/Library/Application Support/쓰담/server.log"); return }
         showLoading("다시 시작하는 중…")
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.startServer() }
     }
@@ -166,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
     }
 
     func fatal(_ msg: String) {
-        let a = NSAlert(); a.messageText = "세특도우미"; a.informativeText = msg; a.runModal()
+        let a = NSAlert(); a.messageText = "쓰담"; a.informativeText = msg; a.runModal()
     }
 
     // MARK: 창 닫기 = 숨기기 (뒤에서 아이폰 기록 계속 받아옴)
@@ -244,15 +244,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         let main = NSMenu()
         let appItem = NSMenuItem(); main.addItem(appItem)
         let app = NSMenu()
-        app.addItem(withTitle: "세특도우미에 관하여", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        app.addItem(withTitle: "쓰담에 관하여", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         app.addItem(.separator())
         let login = NSMenuItem(title: "로그인 시 자동 실행", action: #selector(toggleLogin(_:)), keyEquivalent: "")
         login.target = self; app.addItem(login)
         app.addItem(withTitle: "데이터 폴더 열기", action: #selector(openData), keyEquivalent: "").target = self
         app.addItem(.separator())
-        app.addItem(withTitle: "세특도우미 가리기", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        app.addItem(withTitle: "쓰담 가리기", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         app.addItem(.separator())
-        app.addItem(withTitle: "세특도우미 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        app.addItem(withTitle: "쓰담 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = app
 
         let editItem = NSMenuItem(); main.addItem(editItem)
@@ -288,7 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
     @objc func zoomOut() { webView.pageZoom = max(webView.pageZoom - 0.1, 0.6) }
     @objc func zoomReset() { webView.pageZoom = 1.0 }
     @objc func openData() {
-        let p = NSHomeDirectory() + "/Library/Application Support/세특도우미"
+        let p = NSHomeDirectory() + "/Library/Application Support/쓰담"
         NSWorkspace.shared.open(URL(fileURLWithPath: p))
     }
 
@@ -299,7 +299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
                 else { try SMAppService.mainApp.register() }
             } catch { fatal("설정하지 못했습니다: \(error.localizedDescription)") }
         } else {
-            fatal("시스템 환경설정 → 사용자 및 그룹 → 로그인 항목에서 세특도우미를 추가하세요.")
+            fatal("시스템 환경설정 → 사용자 및 그룹 → 로그인 항목에서 쓰담을 추가하세요.")
         }
     }
 

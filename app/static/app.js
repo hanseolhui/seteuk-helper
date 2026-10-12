@@ -1,4 +1,4 @@
-/* 세특도우미 프론트엔드 (외부 라이브러리 없음) */
+/* 쓰담 프론트엔드 (외부 라이브러리 없음) */
 'use strict';
 
 const $ = (sel, root) => (root || document).querySelector(sel);
@@ -34,7 +34,7 @@ async function api(path, body, opts) {
   }
   let res;
   try { res = await fetch(path, init); }
-  catch (e) { throw new Error('프로그램(서버)과 연결이 끊겼습니다. "세특도우미 시작"을 다시 실행하세요.'); }
+  catch (e) { throw new Error('프로그램(서버)과 연결이 끊겼습니다. "쓰담 시작"을 다시 실행하세요.'); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { const err = new Error(data.error || ('오류 ' + res.status)); if (!opts.silent) toast(err.message, true); throw err; }
   return data;
@@ -224,12 +224,12 @@ async function viewDashboard() {
   const t = d.totals;
   if (!t.classes) {
     view.innerHTML = `<div class="empty card">
-      <h2>세특도우미에 오신 것을 환영합니다</h2>
+      <h2>쓰담에 오신 것을 환영합니다</h2>
       <p>수업 중 녹음한 학생 평가와 상담 기록을 학생별로 모아 세특 초안까지 만들어 주는 도구입니다.</p>
       <div class="steps">
         <div class="card"><b>1</b><h3>설정</h3><p class="muted small">Gemini API 키를 넣거나, 키 없이 '수동 모드'를 선택합니다.</p><a href="#/settings">설정 열기 →</a></div>
         <div class="card"><b>2</b><h3>학급·명단 등록</h3><p class="muted small">학급을 만들고 NEIS 명단의 '번호, 이름'을 복사해 붙여넣습니다.</p><a href="#/classes">학급 만들기 →</a></div>
-        <div class="card"><b>3</b><h3>녹음 올리기</h3><p class="muted small">아이폰 음성메모를 iCloud '세특녹음' 폴더에 저장하거나 끌어다 놓습니다.</p><a href="#/recordings">녹음함 →</a></div>
+        <div class="card"><b>3</b><h3>녹음 올리기</h3><p class="muted small">아이폰 음성메모를 iCloud '쓰담 녹음' 폴더에 저장하거나 끌어다 놓습니다.</p><a href="#/recordings">녹음함 →</a></div>
         <div class="card"><b>4</b><h3>세특 초안</h3><p class="muted small">학생별로 쌓인 관찰기록으로 초안을 만들고 구글시트로 보냅니다.</p><a href="#/drafts">세특 초안 →</a></div>
       </div></div>`;
     return;
@@ -375,7 +375,7 @@ async function viewRecordings(classFilter) {
     const parts = [];
     if (src.voicememo.enabled) parts.push(`음성메모 자동 ${src.voicememo.access === 'ok' ? '<span class="ok-text">켜짐</span>' : '<span class="bad-text">권한 필요</span>'}`);
     if (src.notes.enabled) parts.push(`메모 앱 '${esc(src.notes.folder)}' 폴더 <span class="ok-text">켜짐</span>`);
-    parts.push(`iCloud 세특녹음 폴더 ${src.inbox.exists ? '<span class="ok-text">켜짐</span>' : '없음'}`);
+    parts.push(`iCloud 쓰담 녹음 폴더 ${src.inbox.exists ? '<span class="ok-text">켜짐</span>' : '없음'}`);
     $('#src-line').innerHTML = '자동 가져오기: ' + parts.join(' · ') + (src.voicememo.enabled || src.notes.enabled ? '' : ' — <a href="#/settings/import">음성메모·메모 앱 자동 가져오기 켜기</a>');
   }).catch(() => {});
   const drop = $('#drop'), file = $('#file');
@@ -937,10 +937,10 @@ async function viewSettings(section) {
       </div>
       <div class="card" style="grid-column:1 / -1" id="google">
         <div class="section-title"><h2>구글시트 자동 반영 · 구글 드라이브 백업</h2><span id="g-status" class="small"></span></div>
-        <p class="help" style="margin-top:-4px">한 번 연결해 두면 <b>기록이 바뀔 때마다 5분 안에 구글시트에 자동 반영</b>되고, <b>하루 한 번 전체 기록이 구글 드라이브에 백업</b>됩니다. 직접 파일을 올리거나 덮어쓸 일이 없습니다. (시트는 보기용 사본 — 수정은 세특도우미에서)</p>
+        <p class="help" style="margin-top:-4px">한 번 연결해 두면 <b>기록이 바뀔 때마다 5분 안에 구글시트에 자동 반영</b>되고, <b>하루 한 번 전체 기록이 구글 드라이브에 백업</b>됩니다. 직접 파일을 올리거나 덮어쓸 일이 없습니다. (시트는 보기용 사본 — 수정은 쓰담에서)</p>
         <div class="split">
           <div class="info-box"><b>연결 방법 (5분, 한 번만)</b><ol>
-            <li><a href="https://sheets.new" target="_blank">sheets.new</a> 로 새 구글시트 만들기 (이름 예: 세특도우미)</li>
+            <li><a href="https://sheets.new" target="_blank">sheets.new</a> 로 새 구글시트 만들기 (이름 예: 쓰담)</li>
             <li>시트 메뉴 <b>확장 프로그램 › Apps Script</b> → 원래 있던 내용 지우기</li>
             <li><button class="sm primary" id="copy-gs">스크립트 복사</button> → 붙여넣기 → 저장(⌘S)</li>
             <li><b>배포 › 새 배포</b> → 톱니바퀴 <b>웹 앱</b> → 실행: <b>나</b> · 액세스: <b>모든 사용자</b> → 배포</li>
@@ -958,10 +958,10 @@ async function viewSettings(section) {
         </div>
       </div>
       <div class="card" style="grid-column:1 / -1" id="phone">
-        <div class="section-title"><h2>📱 휴대폰 '세특 녹음' 앱 연결</h2><label class="check"><input type="checkbox" id="drive_inbox" ${s.drive_inbox === '1' ? 'checked' : ''}> 휴대폰 녹음 자동으로 가져오기</label></div>
+        <div class="section-title"><h2>📱 휴대폰 '쓰담' 앱 연결</h2><label class="check"><input type="checkbox" id="drive_inbox" ${s.drive_inbox === '1' ? 'checked' : ''}> 휴대폰 녹음 자동으로 가져오기</label></div>
         <div class="split">
-          <div class="info-box"><b>아이폰</b> — App Store에서 <b>세특 녹음</b> 설치 → 녹음하면 <b>iCloud로 자동 연동</b> (같은 Apple ID면 설정 없음)${s.platform === 'win' ? '<br><span class="small muted">윈도우 PC는 iCloud for Windows가 설치돼 있어야 합니다. 없으면 아래 구글 연결을 쓰세요.</span>' : ''}
-            <br><br><b>안드로이드(갤럭시) · 아이폰 공통</b> — Play 스토어/App Store에서 <b>세특 녹음</b> 설치 → 앱의 <b>컴퓨터 연결</b> → 오른쪽 QR 찍기 → 녹음이 <b>내 구글 드라이브</b>를 거쳐 이 컴퓨터로 자동 전송
+          <div class="info-box"><b>아이폰</b> — App Store에서 <b>쓰담</b> 설치 → 녹음하면 <b>iCloud로 자동 연동</b> (같은 Apple ID면 설정 없음)${s.platform === 'win' ? '<br><span class="small muted">윈도우 PC는 iCloud for Windows가 설치돼 있어야 합니다. 없으면 아래 구글 연결을 쓰세요.</span>' : ''}
+            <br><br><b>안드로이드(갤럭시) · 아이폰 공통</b> — Play 스토어/App Store에서 <b>쓰담</b> 설치 → 앱의 <b>컴퓨터 연결</b> → 오른쪽 QR 찍기 → 녹음이 <b>내 구글 드라이브</b>를 거쳐 이 컴퓨터로 자동 전송
             <p class="small muted" style="margin:6px 0 0">QR에는 '녹음 올리기'만 가능한 전용 열쇠가 들어 있습니다. 휴대폰을 잃어버려도 기록을 볼 수는 없습니다. 구글 연결(위 카드)이 먼저 되어 있어야 합니다.</p></div>
           <div style="text-align:center"><div id="qr-box" class="muted small">불러오는 중…</div>
             <button class="sm" id="phone-scan" style="margin-top:8px">휴대폰 녹음 지금 가져오기</button></div>
@@ -1084,7 +1084,7 @@ async function renderPairing() {
   if (!p || !p.ready) { box.innerHTML = '<div class="warn" style="text-align:left">먼저 위의 <b>구글시트 자동 반영 · 드라이브 백업</b>을 연결하세요. 연결하면 여기에 QR이 나타납니다.</div>'; return; }
   const qr = qrcode(0, 'M'); qr.addData(p.payload); qr.make();
   box.innerHTML = `<div style="background:#fff;display:inline-block;padding:10px;border-radius:10px">${qr.createSvgTag({ cellSize: 5, margin: 2 })}</div>
-    <div class="small muted" style="margin-top:6px">휴대폰 '세특 녹음' 앱 → 컴퓨터 연결 → QR 찍기</div>`;
+    <div class="small muted" style="margin-top:6px">휴대폰 '쓰담' 앱 → 컴퓨터 연결 → QR 찍기</div>`;
 }
 
 async function renderGoogle() {
@@ -1126,7 +1126,7 @@ async function renderWhisper() {
   $('#stt-active').innerHTML = w.engine === 'gemini' || !w.supported ? '<span class="badge amber">지금: Gemini로 받아쓰기 (외부 전송)</span>'
     : hasModel ? '<span class="badge green">지금: 내 맥 안에서 받아쓰기 — 외부 전송 없음</span>' : '<span class="badge red">모델을 내려받아야 받아쓰기가 됩니다</span>';
   if (!w.supported) { box.innerHTML = '<div class="warn">이 맥은 Intel 칩이라 Whisper를 쓸 수 없습니다. Gemini 받아쓰기를 사용하세요.</div>'; return; }
-  if (!w.binary) { box.innerHTML = '<div class="warn">Whisper 실행 파일이 없습니다. 세특도우미를 최신 설치 파일로 다시 설치하세요.</div>'; return; }
+  if (!w.binary) { box.innerHTML = '<div class="warn">Whisper 실행 파일이 없습니다. 쓰담을 최신 설치 파일로 다시 설치하세요.</div>'; return; }
   let downloading = false;
   box.innerHTML = '<div class="table-wrap"><table><tbody>' + w.models.map(m => {
     const dl = m.download && m.download.status === 'downloading' ? m.download : null;
@@ -1183,7 +1183,7 @@ async function renderSources() {
         <label class="switch"><input type="checkbox" id="vm-on" ${vm.enabled ? 'checked' : ''}> 사용</label></div>
       <p>아이폰 <b>음성메모</b>로 녹음만 하면 끝. 저장·공유·파일 이름 정하기가 필요 없습니다. iCloud로 이 맥에 넘어온 녹음을 자동으로 가져옵니다.
         아이폰이 이미 받아쓴 전사문이 있으면 그대로 써서 AI 전사도 건너뜁니다.</p>
-      ${vm.enabled && vm.access === 'no_permission' ? `<div class="warn">맥이 음성메모 보관함을 막고 있습니다. <b>시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한</b>에서 <b>${esc(appName)}</b>을 켜 주세요. 켠 뒤 세특도우미를 껐다 켜야 적용됩니다.
+      ${vm.enabled && vm.access === 'no_permission' ? `<div class="warn">맥이 음성메모 보관함을 막고 있습니다. <b>시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한</b>에서 <b>${esc(appName)}</b>을 켜 주세요. 켠 뒤 쓰담을 껐다 켜야 적용됩니다.
         <div style="margin-top:6px"><button class="sm" id="vm-perm">설정 화면 열기</button></div></div>` : ''}
       ${vm.enabled && vm.access === 'not_found' ? `<div class="warn">이 맥에서 음성메모 보관함을 찾지 못했습니다. 맥의 <b>음성 메모</b> 앱을 한 번 열고, 아이폰과 맥 모두 <b>설정 → [내 이름] → iCloud → 음성 메모</b>가 켜져 있는지 확인하세요.</div>` : ''}
       ${vm.enabled ? `<div class="row" style="margin-top:10px">
@@ -1194,7 +1194,7 @@ async function renderSources() {
       <details style="margin-top:8px"><summary class="small">처음 설정 방법</summary><ol class="small">
         <li>아이폰: <b>설정 → [내 이름] → iCloud → 모두 보기 → 음성 메모</b> 켜기</li>
         <li>맥: <b>시스템 설정 → [내 이름] → iCloud → 음성 메모</b> 켜기, 맥의 <b>음성 메모</b> 앱을 한 번 열어 동기화 확인</li>
-        <li>위 <b>사용</b> 체크 → 안내에 따라 <b>전체 디스크 접근 권한</b> 허용 → 세특도우미 다시 실행</li></ol></details>
+        <li>위 <b>사용</b> 체크 → 안내에 따라 <b>전체 디스크 접근 권한</b> 허용 → 쓰담 다시 실행</li></ol></details>
     </div>
     <div class="source">
       <div class="source-head"><h3>② 메모 앱 받아쓰기 <span class="badge green">AI 키 없이 무료 전사</span> ${nt.enabled ? '<span class="badge green">작동 중</span>' : ''}</h3>
@@ -1209,9 +1209,9 @@ async function renderSources() {
         <li>위 <b>사용</b> 체크 → "메모를 제어하려고 합니다" 창이 뜨면 <b>허용</b></li>
         <li>사용 팁: 메모 제목에 <b>2-3</b> 같은 학급을 쓰거나, 시간표를 채워 두면 학급이 자동 지정됩니다</li></ol></details>
     </div>
-` : '<p class="muted small">아이폰 음성메모·메모 앱 자동 가져오기는 맥에서만 됩니다. 윈도우에서는 휴대폰 \'세특 녹음\' 앱(아래)이나 iCloud 폴더를 쓰세요.</p>') + `
+` : '<p class="muted small">아이폰 음성메모·메모 앱 자동 가져오기는 맥에서만 됩니다. 윈도우에서는 휴대폰 \'쓰담\' 앱(아래)이나 iCloud 폴더를 쓰세요.</p>') + `
     <div class="source">
-      <div class="source-head"><h3>③ iCloud '세특녹음' 폴더 / 단축어 ${src.inbox.exists ? '<span class="badge green">작동 중</span>' : ''}</h3>
+      <div class="source-head"><h3>③ iCloud '쓰담 녹음' 폴더 / 단축어 ${src.inbox.exists ? '<span class="badge green">작동 중</span>' : ''}</h3>
         <button class="sm" id="inbox-open">${src.inbox.exists ? 'Finder에서 열기' : '폴더 만들기'}</button></div>
       <p>이 폴더에 들어온 오디오·텍스트(.txt)를 자동으로 가져옵니다. 아이폰 <b>단축어</b>로 '한 번 눌러 녹음 → 자동 저장' 버튼을 만들 때 사용합니다 (사용설명서 참고).</p>
       <p class="muted small">${esc(src.inbox.dir)}</p>
@@ -1241,7 +1241,7 @@ async function renderSources() {
 }
 
 async function runUpdate(u) {
-  if (!confirmBox(`세특도우미 ${u.latest} 버전으로 업데이트할까요?\n학생 기록은 그대로 유지되며, 업데이트 전에 자동 백업합니다.`)) return;
+  if (!confirmBox(`쓰담 ${u.latest} 버전으로 업데이트할까요?\n학생 기록은 그대로 유지되며, 업데이트 전에 자동 백업합니다.`)) return;
   modal(`<h2>업데이트 중…</h2><p>새 버전을 내려받아 설치하고 있습니다. 끝나면 화면이 자동으로 새로고침됩니다.</p>`);
   try { await api('/api/update/apply', {}); }
   catch (e) { closeModal(); return; }
@@ -1250,7 +1250,7 @@ async function runUpdate(u) {
     await new Promise(r => setTimeout(r, 1000));
     try { const v = await api('/api/version', undefined, { silent: true }); if (v.version === target) { location.reload(); return; } } catch (e) { /* 재시작 중 */ }
   }
-  modal(`<h2>업데이트 확인 필요</h2><p>새 버전이 시작되지 않았습니다. 세특도우미를 종료 후 다시 실행해 주세요.</p><div class="modal-actions"><button onclick="location.reload()">새로고침</button></div>`);
+  modal(`<h2>업데이트 확인 필요</h2><p>새 버전이 시작되지 않았습니다. 쓰담을 종료 후 다시 실행해 주세요.</p><div class="modal-actions"><button onclick="location.reload()">새로고침</button></div>`);
 }
 
 async function checkUpdateBanner() {
@@ -1260,12 +1260,12 @@ async function checkUpdateBanner() {
     const u = await api('/api/update/check', undefined, { silent: true });
     const b = $('#update-banner');
     if (v.shell_outdated && !u.available) {
-      b.innerHTML = `<b>세특도우미가 '앱 창' 버전으로 바뀌었습니다.</b> 브라우저 대신 자기 창으로 열리고, 녹음을 이 맥 안에서 받아쓰는 기능이 들어 있습니다. 기록은 그대로 유지됩니다.
+      b.innerHTML = `<b>쓰담이 '앱 창' 버전으로 바뀌었습니다.</b> 브라우저 대신 자기 창으로 열리고, 녹음을 이 맥 안에서 받아쓰는 기능이 들어 있습니다. 기록은 그대로 유지됩니다.
         <button class="sm primary" id="ub-app">새 앱으로 바꾸기</button> <button class="sm ghost" id="ub-x">나중에</button>`;
       b.classList.remove('hidden');
       $('#ub-x').onclick = () => b.classList.add('hidden');
       $('#ub-app').onclick = async () => {
-        modal('<h2>새 앱 설치 중…</h2><p>잠시 후 세특도우미가 새 창으로 다시 열립니다. 이 브라우저 창은 닫아도 됩니다.</p>');
+        modal('<h2>새 앱 설치 중…</h2><p>잠시 후 쓰담이 새 창으로 다시 열립니다. 이 브라우저 창은 닫아도 됩니다.</p>');
         try { await api('/api/update/install_app', {}); } catch (e) { closeModal(); }
       };
       return;
@@ -1287,7 +1287,7 @@ async function viewPrompts() {
     <div class="info-box" style="margin-bottom:16px"><b>가장 쉬운 방법</b>
       <ol><li>아래 <b>①</b>로 Gemini 'Gem'(또는 ChatGPT 'GPT')을 한 번만 만들어 둡니다.</li>
         <li>학생 화면에서 <b>관찰기록 복사</b> → Gem에 "세특 써줘"와 함께 붙여넣기 → 결과를 학생 화면 편집창에 붙여넣기.</li>
-        <li>세특도우미를 <b>수동 모드</b>로 두면, 녹음·학생 화면의 AI 버튼을 누를 때 명단·기록이 이미 채워진 프롬프트가 자동으로 나옵니다.</li></ol>
+        <li>쓰담을 <b>수동 모드</b>로 두면, 녹음·학생 화면의 AI 버튼을 누를 때 명단·기록이 이미 채워진 프롬프트가 자동으로 나옵니다.</li></ol>
       <p class="small muted" style="margin:6px 0 0">아래 문구의 <b>[대괄호]</b> 부분만 실제 내용으로 바꾸면 됩니다. 설정의 바이트 한도·추가 지침이 반영되어 있습니다.</p></div>
     ${d.templates.map((t, i) => `<div class="card">
       <div class="section-title"><h2>${esc(t.title)}</h2><button class="primary sm p-copy" data-i="${i}">프롬프트 복사</button></div>
@@ -1312,7 +1312,7 @@ function showOnboarding(s) {
   const y = new Date().getFullYear(), sem = (new Date().getMonth() + 1) >= 8 ? 2 : 1;
   const st = { step: 1 };
   const steps = {
-    1: () => `<h2>👋 세특도우미에 오신 것을 환영합니다</h2>
+    1: () => `<h2>👋 쓰담에 오신 것을 환영합니다</h2><p style="margin:-4px 0 8px;color:var(--accent);font-weight:600">말로 담고, 글로 씁니다</p>
       <p class="muted">수업·상담 중 말로 남긴 관찰을 학생별로 모아, 학기말 세특·행동특성·창체 초안을 빠르게 만드는 도구입니다. 1분이면 준비됩니다.</p>
       <div class="row" style="margin-top:12px">
         <label class="field"><span>학교급</span><select id="ob-level">${['고등학교', '중학교', '초등학교'].map(x => `<option ${x === s.school_level ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
@@ -1399,9 +1399,9 @@ async function updatePending() {
 }
 
 $('#btn-quit').onclick = async () => {
-  if (!confirmBox('세특도우미를 종료할까요? (진행 중인 AI 작업은 중단됩니다)')) return;
+  if (!confirmBox('쓰담을 종료할까요? (진행 중인 AI 작업은 중단됩니다)')) return;
   try { await api('/api/shutdown', {}); } catch (e) { /* */ }
-  document.body.innerHTML = '<div class="empty"><h2>종료했습니다</h2><p>이 창을 닫아도 됩니다. 다시 쓰려면 "세특도우미 시작"을 실행하세요.</p></div>';
+  document.body.innerHTML = '<div class="empty"><h2>종료했습니다</h2><p>이 창을 닫아도 됩니다. 다시 쓰려면 "쓰담 시작"을 실행하세요.</p></div>';
 };
 
 document.addEventListener('focusout', () => {

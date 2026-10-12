@@ -1,28 +1,28 @@
 /**
- * 세특도우미 ↔ 구글시트·드라이브 연결 스크립트 (버전 3)
+ * 쓰담 ↔ 구글시트·드라이브 연결 스크립트 (버전 4)
  *
  * 하는 일
- *  - 세특도우미의 학급별 세특·관찰기록을 이 시트에 자동으로 반영 (앱 → 시트, 보기용 사본)
- *  - 하루 한 번 전체 기록을 압축해 내 구글 드라이브 '세특도우미 백업' 폴더에 저장 (최근 30개)
- *  - 휴대폰 '세특 녹음' 앱의 녹음을 드라이브 '세특도우미 녹음함'에 받아 컴퓨터로 전달
+ *  - 쓰담의 학급별 세특·관찰기록을 이 시트에 자동으로 반영 (앱 → 시트, 보기용 사본)
+ *  - 하루 한 번 전체 기록을 압축해 내 구글 드라이브 '쓰담 백업' 폴더에 저장 (최근 30개)
+ *  - 휴대폰 '쓰담' 앱의 녹음을 드라이브 '쓰담 녹음함'에 받아 컴퓨터로 전달
  *
  * 설치
  *  1. 구글시트에서 [확장 프로그램] → [Apps Script]
  *  2. 기존 내용을 지우고 이 파일 전체를 붙여넣고 저장(⌘S)
- *     (세특도우미의 '스크립트 복사' 버튼을 쓰면 아래 TOKEN이 자동으로 채워져 있습니다)
+ *     (쓰담의 '스크립트 복사' 버튼을 쓰면 아래 TOKEN이 자동으로 채워져 있습니다)
  *  3. [배포] → [새 배포] → 톱니바퀴에서 '웹 앱'
  *     - 다음 사용자 인증정보로 실행: 나 / 액세스 권한이 있는 사용자: 모든 사용자
  *  4. [배포] → 권한 검토 → 내 계정 → (경고 화면이면 '고급' → '안전하지 않음으로 이동') → 허용
- *  5. 웹 앱 URL(…/exec)을 세특도우미 설정에 붙여넣기
+ *  5. 웹 앱 URL(…/exec)을 쓰담 설정에 붙여넣기
  *
  * 스크립트를 새 버전으로 바꿨을 때: [배포] → [배포 관리] → 연필 → 버전: '새 버전' → 배포 (URL은 그대로)
  */
 var TOKEN = '';            // 컴퓨터 프로그램용 (모든 기능)
 var UPLOAD_TOKEN = '';     // 휴대폰 앱용 (녹음 올리기만 가능)
-var SCRIPT_VERSION = 3;
-var INBOX_FOLDER = '세특도우미 녹음함';
-var BACKUP_FOLDER = '세특도우미 백업';
-var REGISTRY = '_세특도우미';
+var SCRIPT_VERSION = 4;
+var INBOX_FOLDER = '쓰담 녹음함';
+var BACKUP_FOLDER = '쓰담 백업';
+var REGISTRY = '_쓰담';
 
 function doPost(e) {
   try {
@@ -51,7 +51,7 @@ function doPost(e) {
 }
 
 function doGet() {
-  return json_({ ok: true, version: SCRIPT_VERSION, message: '세특도우미 연결 스크립트가 작동 중입니다.' });
+  return json_({ ok: true, version: SCRIPT_VERSION, message: '쓰담 연결 스크립트가 작동 중입니다.' });
 }
 
 function sync_(sheets, keepOthers) {
@@ -71,13 +71,13 @@ function sync_(sheets, keepOthers) {
       sh.setFrozenRows(1);
       (s.widths || []).forEach(function (w, i) { sh.setColumnWidth(i + 1, Math.max(40, Math.round(w * 7.5))); });
     }
-    sh.getRange(1, header.length + 2).setValue('세특도우미에서 자동 반영 · ' + new Date().toLocaleString('ko-KR') + ' · 여기서 고친 내용은 다음 동기화 때 덮어써집니다');
+    sh.getRange(1, header.length + 2).setValue('쓰담에서 자동 반영 · ' + new Date().toLocaleString('ko-KR') + ' · 여기서 고친 내용은 다음 동기화 때 덮어써집니다');
     // 실수로 고치지 않게 경고만 표시하는 보호
     var prot = sh.getProtections(SpreadsheetApp.ProtectionType.SHEET);
-    if (!prot.length) sh.protect().setWarningOnly(true).setDescription('세특도우미 자동 반영 시트');
+    if (!prot.length) sh.protect().setWarningOnly(true).setDescription('쓰담 자동 반영 시트');
   });
   if (!keepOthers) {
-    // 예전에 세특도우미가 만든 시트 중 지금 없는 학급 시트 정리
+    // 예전에 쓰담가 만든 시트 중 지금 없는 학급 시트 정리
     var reg = ss.getSheetByName(REGISTRY);
     var prev = reg ? reg.getRange('A:A').getValues().map(function (r) { return r[0]; }).filter(String) : [];
     prev.forEach(function (n) {
@@ -168,13 +168,7 @@ function getInboxFile_(id) {
 
 function doneInbox_(id) {
   var f = DriveApp.getFileById(id);
-  f.moveTo(doneFolder_());
-  // 처리완료 폴더는 최근 200개만 보관
-  var files = [];
-  var it = doneFolder_().getFiles();
-  while (it.hasNext()) files.push(it.next());
-  files.sort(function (a, b) { return b.getDateCreated() - a.getDateCreated(); });
-  files.slice(200).forEach(function (x) { x.setTrashed(true); });
+  f.moveTo(doneFolder_());  // 지우지 않음 — 학기말 이후까지 원본 보관 (필요하면 선생님이 직접 정리)
   return { ok: true, version: SCRIPT_VERSION };
 }
 

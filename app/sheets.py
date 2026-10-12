@@ -3,7 +3,7 @@
 
 - 엑셀(.xlsx): 요약 + 학급별 세특 + 관찰기록 전체 → ~/Downloads
 - 구글시트 자동 동기화: 내용이 바뀌면 5분 안에 시트에 반영 (앱 → 시트 한 방향, 시트는 '보기용 사본')
-- 구글 드라이브 백업: 하루 한 번 DB 전체를 압축해 드라이브 '세특도우미 백업' 폴더에 저장 (최근 30개)
+- 구글 드라이브 백업: 하루 한 번 DB 전체를 압축해 드라이브 '쓰담 백업' 폴더에 저장 (최근 30개)
   → 맥이 고장 나도 드라이브 백업으로 복원 가능
 """
 import base64
@@ -106,7 +106,7 @@ def export_xlsx(class_id=None):
     finally:
         conn.close()
     import platform_util
-    path = os.path.join(platform_util.downloads_dir(), "세특도우미_%s_%s.xlsx" % (name.replace("/", "-"),
+    path = os.path.join(platform_util.downloads_dir(), "쓰담_%s_%s.xlsx" % (name.replace("/", "-"),
                                                        datetime.datetime.now().strftime("%Y%m%d-%H%M")))
     xlsx.write(path, books)
     return path
@@ -194,7 +194,7 @@ def _db_zip_bytes():
         zpath = os.path.join(tmp, "b.zip")
         with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
             z.write(dbfile, "seteuk.db")
-            z.writestr("info.json", json.dumps({"app": "세특도우미", "version": version.VERSION,
+            z.writestr("info.json", json.dumps({"app": "쓰담", "version": version.VERSION,
                                                 "created": datetime.datetime.now().isoformat()}))
         with open(zpath, "rb") as f:
             return f.read()
@@ -205,7 +205,7 @@ def _db_zip_bytes():
 
 def drive_backup():
     data = _db_zip_bytes()
-    name = "세특도우미-백업-%s.zip" % datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    name = "쓰담-백업-%s.zip" % datetime.datetime.now().strftime("%Y%m%d-%H%M")
     res = _call("backup", {"filename": name, "data": base64.b64encode(data).decode("ascii"), "keep": 30}, timeout=300)
     db.set_settings({"drive_last_backup": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")})
     return {"ok": True, "name": name, "size": len(data), "url": res.get("url")}
@@ -223,7 +223,7 @@ def drive_get(file_id):
 # ───────────────────────── 휴대폰 녹음함 (구글 드라이브) ─────────────────────────
 
 def drive_inbox_scan():
-    """휴대폰 앱이 드라이브 '세특도우미 녹음함'에 올린 녹음을 가져와 녹음함에 넣는다."""
+    """휴대폰 앱이 드라이브 '쓰담 녹음함'에 올린 녹음을 가져와 녹음함에 넣는다."""
     import watcher
     files = _call("list_inbox", {}).get("files", [])
     imported = 0
@@ -271,7 +271,7 @@ def restore_from_bytes(data):
         if data[:2] == b"PK":
             with zipfile.ZipFile(io.BytesIO(data)) as z:
                 if "seteuk.db" not in z.namelist():
-                    raise ValueError("세특도우미 백업 파일이 아닙니다.")
+                    raise ValueError("쓰담 백업 파일이 아닙니다.")
                 with open(src, "wb") as f:
                     f.write(z.read("seteuk.db"))
         elif data[:16] == b"SQLite format 3\x00":
@@ -283,7 +283,7 @@ def restore_from_bytes(data):
         try:
             tables = {r[0] for r in chk.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if not {"classes", "students", "notes"} <= tables:
-                raise ValueError("세특도우미 백업 파일이 아닙니다.")
+                raise ValueError("쓰담 백업 파일이 아닙니다.")
             counts = {t: chk.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in ("classes", "students", "notes")}
         finally:
             chk.close()

@@ -26,7 +26,7 @@ DEFAULT_SETTINGS = {
     "teacher_subject": "",
     "style_examples": "",
     "draft_guidance": "",
-    "inbox_dir": os.path.join(platform_util.icloud_drive_dir(), "세특녹음"),
+    "inbox_dir": os.path.join(platform_util.icloud_drive_dir(), "쓰담 녹음"),
     "auto_process": "1",                # 수신 폴더 파일을 자동 전사·분리
     "sheets_url": "",
     "sheets_token": "",
@@ -215,6 +215,11 @@ def _migrate_columns(conn):
     if "area" not in cols("notes"):
         conn.execute("ALTER TABLE notes ADD COLUMN area TEXT DEFAULT ''")
     conn.execute("UPDATE drafts SET area='subject' WHERE area IS NULL OR area='' OR area='세특'")
+    # 데이터 폴더 이름이 바뀐 경우(세특도우미 → 쓰담) 녹음 경로 고침
+    old = os.sep + platform_util.OLD_APP_NAME + os.sep
+    new = os.sep + platform_util.APP_NAME + os.sep
+    conn.execute("UPDATE recordings SET audio_path = REPLACE(audio_path, ?, ?) WHERE audio_path LIKE ?",
+                 (old, new, "%" + old + "%"))
 
 
 def note_area(note, class_kind):

@@ -1,7 +1,7 @@
 #!/bin/bash
 # 새 버전 배포:  tools/release.sh 1.2.0 "바뀐 점 설명"
 # → 버전 올리기, 앱/DMG 빌드, git 커밋·태그·푸시, GitHub 릴리스 생성(파일 3개 첨부)
-# 선생님 맥의 세특도우미가 실행될 때 새 버전을 알려주고, 버튼 한 번으로 업데이트됩니다.
+# 선생님 컴퓨터의 쓰담이 실행될 때 새 버전을 알려주고, 버튼 한 번으로 업데이트됩니다.
 set -euo pipefail
 V="${1:?사용법: tools/release.sh 1.2.0 \"바뀐 점\"}"
 NOTES="${2:-}"
@@ -15,7 +15,7 @@ git commit -m "Release v$V"
 git tag "v$V"
 git push origin HEAD --tags
 if [ -n "$NOTES" ]; then N=(--notes "$NOTES"); else N=(--generate-notes); fi
-ASSETS=(dist/SeteukHelper.dmg dist/SeteukHelper-mac.zip dist/seteuk-app.zip dist/whisper-cli-arm64.zip)
+ASSETS=(dist/Sseudam.dmg dist/Sseudam-mac.zip dist/seteuk-app.zip dist/whisper-cli-arm64.zip)
 [ -f dist/iPhone-Shortcuts.zip ] && ASSETS+=(dist/iPhone-Shortcuts.zip)
-gh release create "v$V" "${ASSETS[@]}" --title "세특도우미 $V" "${N[@]}"
+gh release create "v$V" "${ASSETS[@]}" --title "쓰담 $V" "${N[@]}"
 echo "배포 완료: v$V"

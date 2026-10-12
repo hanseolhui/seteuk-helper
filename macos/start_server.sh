@@ -1,7 +1,7 @@
 #!/bin/bash
-# 세특도우미.app 이 호출: 파이썬을 찾고, 가장 높은 버전의 코드로 서버를 실행한다.
+# 쓰담.app 이 호출: 파이썬을 찾고, 가장 높은 버전의 코드로 서버를 실행한다.
 # 종료 코드 3 = 파이썬(명령어 라인 도구) 없음 → 앱이 설치 안내를 띄움
-SUPPORT="$HOME/Library/Application Support/세특도우미"
+SUPPORT="$HOME/Library/Application Support/쓰담"
 mkdir -p "$SUPPORT"
 LOG="$SUPPORT/server.log"
 # 로그가 너무 커지면 정리

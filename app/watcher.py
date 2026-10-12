@@ -2,7 +2,7 @@
 """녹음·메모 가져오기.
 
 세 가지 경로를 자동으로 감시한다.
-1. 수신 폴더(iCloud Drive/세특녹음): 단축어나 '파일에 저장'으로 넣은 오디오·텍스트
+1. 수신 폴더(iCloud Drive/쓰담 녹음 · 예전 세특녹음): 단축어나 '파일에 저장'으로 넣은 오디오·텍스트
 2. 음성메모 보관함: 아이폰 음성메모가 iCloud로 맥에 동기화된 것 (전체 디스크 접근 권한 필요)
    - 아이폰이 이미 받아쓴 전사문이 파일 안에 있으면 그대로 사용 → AI 전사 생략
 3. 메모 앱의 '세특' 폴더: 아이폰 키보드 받아쓰기(마이크 버튼)로 적은 메모
@@ -29,10 +29,11 @@ VOICEMEMO_DIRS = [
     "~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings",
     "~/Library/Application Support/com.apple.voicememos/Recordings",
 ]
-# 아이폰 '세특 녹음/받아쓰기' 단축어가 저장하는 곳 (iCloud Drive › Shortcuts › 세특녹음)
-SHORTCUTS_DIR = "~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/세특녹음"
-# 아이폰 '세특 녹음' 앱이 iCloud에 저장하는 곳 (같은 Apple ID면 자동 동기화)
-RECORDER_CONTAINER = "iCloud~kr~seteuk~recorder"
+# 아이폰 '쓰담 녹음/받아쓰기' 단축어가 저장하는 곳 (iCloud Drive › Shortcuts › 쓰담) — 예전 이름 폴더도 계속 확인
+SHORTCUTS_DIRS = ["~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/쓰담",
+                  "~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/세특녹음"]
+# 아이폰 '쓰담' 앱이 iCloud에 저장하는 곳 (같은 Apple ID면 자동 동기화)
+RECORDER_CONTAINERS = ["iCloud~kr~sseudam~app", "iCloud~kr~seteuk~recorder"]
 _status = {"inbox": "", "voicememo": "", "notes": ""}
 _seen_sizes = {}
 _scan_lock = threading.Lock()
@@ -171,7 +172,9 @@ def inbox_dirs():
     settings = db.get_settings()
     dirs = []
     import platform_util
-    for d in (settings.get("inbox_dir") or "", SHORTCUTS_DIR, platform_util.icloud_container_dir(RECORDER_CONTAINER)):
+    cands = [settings.get("inbox_dir") or "", os.path.join(platform_util.icloud_drive_dir(), "세특녹음")] + SHORTCUTS_DIRS \
+        + [platform_util.icloud_container_dir(c) for c in RECORDER_CONTAINERS]
+    for d in cands:
         d = os.path.expanduser(d)
         if d and os.path.isdir(d) and d not in dirs:
             dirs.append(d)

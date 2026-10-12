@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """아이폰 단축어 파일 만들기 → shortcuts sign 으로 서명 → dist/ 에 저장.
 
-만든 단축어는 녹음/받아쓰기 결과를 iCloud Drive › Shortcuts › 세특녹음 폴더에 저장하고,
-맥의 세특도우미가 그 폴더를 자동으로 가져온다.
+만든 단축어는 녹음/받아쓰기 결과를 iCloud Drive › Shortcuts › 쓰담 폴더에 저장하고,
+컴퓨터의 쓰담이 그 폴더를 자동으로 가져온다.
 실행: python3 tools/build_shortcuts.py   (이 맥이 iCloud에 로그인돼 있어야 서명됨)
 """
 import os
@@ -13,7 +13,7 @@ import uuid
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "dist")
-FOLDER = "세특녹음"
+FOLDER = "쓰담"
 
 
 def _date_name(prefix, ext=""):
@@ -65,13 +65,13 @@ def record_shortcut():
                                         "WFRecordingStart": "Immediately", "WFRecordingEnd": "On Tap"}},
         {"WFWorkflowActionIdentifier": "is.workflow.actions.setitemname",
          "WFWorkflowActionParameters": {"UUID": named, "WFInput": _output(rec, "Recorded Audio"),
-                                        "WFName": _date_name("세특 ")}},
+                                        "WFName": _date_name("쓰담 ")}},
         {"WFWorkflowActionIdentifier": "is.workflow.actions.documentpicker.save",
          "WFWorkflowActionParameters": {"WFInput": _output(named, "Renamed Item"), "WFAskWhereToSave": False,
                                         "WFFileDestinationPath": FOLDER + "/", "WFSaveFileOverwrite": False}},
         {"WFWorkflowActionIdentifier": "is.workflow.actions.notification",
-         "WFWorkflowActionParameters": {"WFNotificationActionTitle": "세특 녹음 저장됨",
-                                        "WFNotificationActionBody": "맥의 세특도우미로 자동 전송됩니다.",
+         "WFWorkflowActionParameters": {"WFNotificationActionTitle": "쓰담 녹음 저장됨",
+                                        "WFNotificationActionBody": "컴퓨터의 쓰담으로 자동 전송됩니다.",
                                         "WFNotificationActionSound": False}},
     ], 4282601983, 59511)  # 파랑, 마이크
 
@@ -84,13 +84,13 @@ def dictate_shortcut():
                                         "WFDictateTextStopListening": "On Tap"}},
         {"WFWorkflowActionIdentifier": "is.workflow.actions.setitemname",
          "WFWorkflowActionParameters": {"UUID": named, "WFInput": _output(txt, "Dictated Text"),
-                                        "WFName": _date_name("세특 메모 ", ".txt")}},
+                                        "WFName": _date_name("쓰담 메모 ", ".txt")}},
         {"WFWorkflowActionIdentifier": "is.workflow.actions.documentpicker.save",
          "WFWorkflowActionParameters": {"WFInput": _output(named, "Renamed Item"), "WFAskWhereToSave": False,
                                         "WFFileDestinationPath": FOLDER + "/", "WFSaveFileOverwrite": False}},
         {"WFWorkflowActionIdentifier": "is.workflow.actions.notification",
-         "WFWorkflowActionParameters": {"WFNotificationActionTitle": "세특 메모 저장됨",
-                                        "WFNotificationActionBody": "맥의 세특도우미로 자동 전송됩니다.",
+         "WFWorkflowActionParameters": {"WFNotificationActionTitle": "쓰담 메모 저장됨",
+                                        "WFNotificationActionBody": "컴퓨터의 쓰담으로 자동 전송됩니다.",
                                         "WFNotificationActionSound": False}},
     ], 4292093695, 59759)  # 초록, 말풍선
 
@@ -98,7 +98,7 @@ def dictate_shortcut():
 def main():
     os.makedirs(OUT, exist_ok=True)
     ok = True
-    for name, wf in (("세특 녹음", record_shortcut()), ("세특 받아쓰기", dictate_shortcut())):
+    for name, wf in (("쓰담 녹음", record_shortcut()), ("쓰담 받아쓰기", dictate_shortcut())):
         raw = os.path.join(OUT, name + ".unsigned.shortcut")
         signed = os.path.join(OUT, name + ".shortcut")
         with open(raw, "wb") as f:

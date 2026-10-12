@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """GitHub 릴리스로 프로그램 업데이트.
 
-- 코드(app 폴더)만 ~/Library/Application Support/세특도우미/code/<버전>/ 에 내려받는다.
+- 코드(app 폴더)만 ~/Library/Application Support/쓰담/code/<버전>/ 에 내려받는다.
 - 학생 데이터(data 폴더)는 건드리지 않는다.
 - 앱 실행기는 '앱에 들어 있는 코드'와 '내려받은 코드' 중 가장 높은 버전을 실행한다.
 """
@@ -33,7 +33,7 @@ def vtuple(v):
 
 
 def _get(url, timeout=20):
-    req = urllib.request.Request(url, headers={"User-Agent": "seteuk-helper/" + version.VERSION,
+    req = urllib.request.Request(url, headers={"User-Agent": "sseudam/" + version.VERSION,
                                                "Accept": "application/vnd.github+json"})
     return urllib.request.urlopen(req, timeout=timeout, context=gemini._CTX)
 
@@ -140,18 +140,23 @@ def shell_outdated():
     return bool(platform_util.IS_MAC and os.environ.get("SETEUK_APP")) and shell_version() < version.SHELL_REQUIRED
 
 
+APP_BUNDLE = "쓰담.app"
+OLD_BUNDLES = ["세특도우미.app"]
+
+
 def _installed_app_path():
+    """지금 설치된 앱 위치 (예전 이름 포함)."""
     p = os.environ.get("SETEUK_APP_PATH")
     if p and p.endswith(".app"):
         return p
-    # 앱 번들 안 코드로 실행 중이면 그 번들
     here = os.path.abspath(os.path.join(db.APP_DIR, "..", "..", ".."))
     if here.endswith(".app"):
         return here
-    for c in ("/Applications/세특도우미.app", os.path.expanduser("~/Applications/세특도우미.app")):
-        if os.path.isdir(c):
-            return c
-    return "/Applications/세특도우미.app"
+    for folder in ("/Applications", os.path.expanduser("~/Applications")):
+        for name in [APP_BUNDLE] + OLD_BUNDLES:
+            if os.path.isdir(os.path.join(folder, name)):
+                return os.path.join(folder, name)
+    return os.path.join("/Applications", APP_BUNDLE)
 
 
 def _asset_url(name):
@@ -176,20 +181,21 @@ def _download(url, dest, digest=""):
 
 
 def install_app():
-    """최신 세특도우미.app 을 받아 설치 위치에 교체하고, 새 앱을 실행한 뒤 지금 서버를 끝낸다."""
+    """최신 쓰담.app 을 받아 설치 위치에 교체하고, 새 앱을 실행한 뒤 지금 서버를 끝낸다."""
     url, digest = _asset_url(version.APP_ASSET)
-    target = _installed_app_path()
-    parent = os.path.dirname(target)
+    current = _installed_app_path()
+    parent = os.path.dirname(current)
     if not os.access(parent, os.W_OK):
         parent = os.path.expanduser("~/Applications")
         os.makedirs(parent, exist_ok=True)
-        target = os.path.join(parent, "세특도우미.app")
+    target = os.path.join(parent, APP_BUNDLE)
     tmp = tempfile.mkdtemp(prefix="seteuk-app-")
     zpath = os.path.join(tmp, "app.zip")
     _download(url, zpath, digest)
     r = subprocess.run(["ditto", "-x", "-k", zpath, tmp], capture_output=True)
-    new_app = os.path.join(tmp, "세특도우미.app")
-    if r.returncode != 0 or not os.path.isdir(new_app):
+    apps = [d for d in os.listdir(tmp) if d.endswith(".app")]
+    new_app = os.path.join(tmp, apps[0]) if apps else ""
+    if r.returncode != 0 or not new_app:
         raise ValueError("앱 파일을 풀지 못했습니다.")
     old = target + ".old"
     shutil.rmtree(old, ignore_errors=True)
@@ -203,6 +209,11 @@ def install_app():
         raise
     shutil.rmtree(old, ignore_errors=True)
     shutil.rmtree(tmp, ignore_errors=True)
+    # 예전 이름(세특도우미.app)은 정리
+    for name in OLD_BUNDLES:
+        legacy = os.path.join(parent, name)
+        if os.path.isdir(legacy) and legacy != target:
+            shutil.rmtree(legacy, ignore_errors=True)
     # 지금 서버가 내려간 뒤 새 앱이 서버를 새로 띄우도록 잠시 뒤 실행
     subprocess.Popen(["/bin/bash", "-c", "sleep 2; open %s" % shlex_quote(target)], start_new_session=True)
     threading.Thread(target=lambda: (time.sleep(0.8), os._exit(0)), daemon=True).start()
