@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// 담기 화면: 큰 녹음 버튼 하나 + 한 줄 메모. 묻지 않고 바로 저장하고, 필요하면 저장 카드에서 고친다.
@@ -54,8 +55,12 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(greeting).font(Theme.font(22, .bold))
                 HStack(spacing: 6) {
-                    if store.autoSend {
+                    if store.autoSend && store.computerSeen {
                         Pill(text: "컴퓨터로 자동 전송", icon: "checkmark.circle.fill", color: Theme.mint)
+                    } else if store.autoSend {
+                        Button { nav.tab = .connect } label: {
+                            Pill(text: "컴퓨터 쓰담 기다리는 중", icon: "hourglass", color: Theme.butter)
+                        }
                     } else {
                         Button { nav.tab = .connect } label: {
                             Pill(text: "컴퓨터와 연결하기", icon: "link", color: Theme.coral)
@@ -261,16 +266,70 @@ struct SavedCard: View {
                         .onSubmit { store.edit(entry, memo: memo) }
                 }
             }
-            Text(remaining > 0 ? "\(remaining)초 뒤에 컴퓨터로 보내요 · 그 전에 고칠 수 있어요" : (store.autoSend ? "컴퓨터로 보내는 중이에요" : "‘연결’에서 컴퓨터와 연결하면 자동으로 보내져요"))
-                .font(Theme.font(12)).foregroundStyle(Theme.soft)
+            if entry.isAudio { TranscriptPreview(entry: entry) }
+            Label(status, systemImage: statusIcon)
+                .font(Theme.font(12)).foregroundStyle(current.received ? Theme.mint : Theme.soft)
         }
         .card()
+        .animation(.easeInOut, value: current)
         .onAppear { memo = entry.memo; kind = entry.kind; remaining = max(0, Int(entry.editableUntil.timeIntervalSinceNow.rounded())) }
         .onReceive(timer) { _ in
             remaining = max(0, Int(entry.editableUntil.timeIntervalSinceNow.rounded()))
             if remaining == 0 && memo != entry.memo && entry.isAudio { store.edit(entry, memo: memo) }
         }
         .onDisappear { if entry.isAudio && memo != entry.memo { store.edit(entry, memo: memo) } }
+    }
+}
+
+extension SavedCard {
+    var current: Entry { store.items.first(where: { $0.id == entry.id }) ?? entry }
+
+    var status: String {
+        let e = current
+        if remaining > 0 { return "\(remaining)초 뒤에 보내요 · 그 전에 유형·메모를 고칠 수 있어요" }
+        if e.stt == .working { return "글자로 바꾸고 나서 보낼게요" }
+        if e.received { return "컴퓨터의 쓰담이 받았어요" }
+        if e.google == .done { return "구글 드라이브로 보냈어요 · 컴퓨터 쓰담이 켜지면 가져가요" }
+        if e.icloud == .done { return "iCloud에 올렸어요 · 맥에서 쓰담을 켜면 가져가요" }
+        if [e.icloud, e.google].contains(.failed) { return "보내지 못했어요 · 기록함에서 다시 시도해요" }
+        if !store.autoSend { return "휴대폰에 보관했어요 · ‘연결’에서 컴퓨터와 연결하면 보내져요" }
+        return "보내는 중이에요"
+    }
+
+    var statusIcon: String {
+        let e = current
+        if e.received { return "checkmark.circle.fill" }
+        if e.icloud == .done || e.google == .done { return "icloud.and.arrow.up" }
+        if remaining > 0 || e.stt == .working { return "clock" }
+        return "iphone"
+    }
+}
+
+/// 받아쓴 글 미리 보기 (진행 중이면 표시)
+struct TranscriptPreview: View {
+    @EnvironmentObject var store: Store
+    var entry: Entry
+    var e: Entry { store.items.first(where: { $0.id == entry.id }) ?? entry }
+
+    var body: some View {
+        switch e.stt {
+        case .working:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("아이폰에서 글자로 바꾸는 중…").font(Theme.font(13)).foregroundStyle(Theme.soft)
+            }
+        case .done where !e.transcript.isEmpty:
+            Text(e.transcript).font(Theme.font(14)).lineLimit(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Theme.bg, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        case .done:
+            Text("말소리를 찾지 못했어요").font(Theme.font(12)).foregroundStyle(Theme.soft)
+        case .unavailable, .failed:
+            Text(e.sttNote.isEmpty ? "컴퓨터에서 글자로 바꿔요" : e.sttNote).font(Theme.font(12)).foregroundStyle(Theme.soft)
+        case .none:
+            EmptyView()
+        }
     }
 }
 

@@ -33,6 +33,23 @@ enum Sync {
         }.value
     }
 
+    /// iCloud '쓰담/처리완료' 폴더에 있는 파일 이름 중 `names`에 든 것 (맥의 쓰담이 가져간 기록)
+    static func receivedNames(_ names: Set<String>) async -> Set<String> {
+        await Task.detached(priority: .utility) {
+            guard let root = FileManager.default.url(forUbiquityContainerIdentifier: container) else { return [] }
+            let done = root.appendingPathComponent("Documents/처리완료", isDirectory: true)
+            let list = (try? FileManager.default.contentsOfDirectory(atPath: done.path)) ?? []
+            var out = Set<String>()
+            for raw in list {
+                var n = raw
+                // 아직 내려받지 않은 파일은 ".이름.icloud" 로 보인다
+                if n.hasPrefix(".") && n.hasSuffix(".icloud") { n = String(n.dropFirst().dropLast(7)) }
+                if names.contains(n) { out.insert(n) }
+            }
+            return out
+        }.value
+    }
+
     /// 선생님 본인의 구글 Apps Script(쓰담이 만든 것)로 업로드 → 드라이브 '쓰담 녹음함'
     static func uploadToGoogle(file: URL, entry r: Entry, url: String, token: String) async throws {
         guard let endpoint = URL(string: url) else { throw SyncError.server("연결 주소가 올바르지 않습니다.") }

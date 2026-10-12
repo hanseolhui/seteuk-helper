@@ -147,7 +147,11 @@ struct RecordsView: View {
 
     @ViewBuilder func syncBadge(_ e: Entry) -> some View {
         let states = [e.icloud, e.google].filter { $0 != .off }
-        if states.contains(.failed) { mini("exclamationmark.triangle.fill", "다시 시도", Theme.coral) }
+        if e.stt == .working { mini("text.bubble", "받아쓰는 중", Theme.soft) }
+        else if states.contains(.failed) { mini("exclamationmark.triangle.fill", "다시 시도", Theme.coral) }
+        else if e.received { mini("checkmark.circle.fill", "컴퓨터가 받음", Theme.mint) }
+        else if e.google == .done { mini("checkmark.circle.fill", "보냄", Theme.mint) }
+        else if e.icloud == .done { mini("icloud.fill", "iCloud에 올림", Theme.blue) }
         else if states.contains(.pending) { mini("clock", "보낼 예정", Theme.soft) }
         else if states.contains(.done) { mini("checkmark.circle.fill", "보냄", Theme.mint) }
         else { mini("iphone", "휴대폰에만 있음", Theme.soft) }
@@ -170,6 +174,7 @@ struct EntryDetail: View {
     @State private var kind = "수업"
     @State private var memo = ""
     @State private var text = ""
+    @State private var transcript = ""
 
     var current: Entry { store.items.first(where: { $0.id == entry.id }) ?? entry }
     var sent: Bool { current.icloud == .done || current.google == .done }
@@ -195,6 +200,8 @@ struct EntryDetail: View {
                 }
                 .frame(maxWidth: .infinity).card(padding: 22)
 
+                if current.isAudio { transcriptCard }
+
                 VStack(alignment: .leading, spacing: 12) {
                     HStack { Text("유형").font(Theme.font(15, .semibold)); Spacer(); KindPicker(kind: $kind).disabled(sent) }
                     if current.isAudio {
@@ -206,7 +213,7 @@ struct EntryDetail: View {
                 }.card()
 
                 VStack(alignment: .leading, spacing: 10) {
-                    status("iCloud (맥)", current.icloud)
+                    status("iCloud (맥)", current.icloud, received: current.received)
                     status("구글 드라이브", current.google)
                     if !current.lastError.isEmpty { Text(current.lastError).font(Theme.font(12)).foregroundStyle(Theme.coral) }
                 }.card()
@@ -224,21 +231,60 @@ struct EntryDetail: View {
         .softBackground()
         .navigationTitle(current.isAudio ? "녹음" : "메모")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { kind = current.kind; memo = current.memo; text = current.text }
+        .onAppear { kind = current.kind; memo = current.memo; text = current.text; transcript = current.transcript }
+        .onChange(of: current.transcript) { t in if transcript.isEmpty { transcript = t } }
         .onDisappear {
-            if !sent && (kind != current.kind || memo != current.memo || (!current.isAudio && text != current.text)) {
-                store.edit(current, kind: kind, memo: memo, text: current.isAudio ? nil : text)
+            let tChanged = current.isAudio && transcript != current.transcript
+            if !sent && (kind != current.kind || memo != current.memo || (!current.isAudio && text != current.text) || tChanged) {
+                store.edit(current, kind: kind, memo: memo, text: current.isAudio ? nil : text,
+                           transcript: tChanged ? transcript : nil)
             }
         }
     }
 
-    func status(_ name: String, _ s: SyncState) -> some View {
+    /// 아이폰에서 받아쓴 글 — 보내기 전에는 고칠 수 있다
+    @ViewBuilder var transcriptCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("받아쓴 글", systemImage: "text.bubble.fill").font(Theme.font(15, .semibold))
+                Spacer()
+                if current.stt == .failed || current.stt == .unavailable || (current.stt == .done && current.transcript.isEmpty) {
+                    if !sent && Transcriber.supported {
+                        Button("다시 받아쓰기") { store.transcribe(current) }.font(Theme.font(13, .semibold))
+                    }
+                }
+            }
+            switch current.stt {
+            case .working:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("아이폰에서 글자로 바꾸는 중…").font(Theme.font(14)).foregroundStyle(Theme.soft)
+                }
+            case .done where !current.transcript.isEmpty:
+                TextField("받아쓴 글", text: $transcript, axis: .vertical).font(Theme.font(16)).lineLimit(3...20)
+                    .disabled(sent)
+                Text(sent ? "컴퓨터로 함께 보냈어요." : "잘못 들린 이름이나 낱말은 여기서 고쳐요. 보낼 때 함께 가요.")
+                    .font(Theme.font(12)).foregroundStyle(Theme.soft)
+            case .done:
+                Text("말소리를 찾지 못했어요.").font(Theme.font(14)).foregroundStyle(Theme.soft)
+            case .unavailable, .failed, .none:
+                Text(current.sttNote.isEmpty ? "컴퓨터의 쓰담이 글자로 바꿔요." : current.sttNote)
+                    .font(Theme.font(14)).foregroundStyle(Theme.soft)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+    }
+
+    func status(_ name: String, _ s: SyncState, received: Bool = false) -> some View {
         HStack {
             Text(name).font(Theme.font(14))
             Spacer()
             switch s {
             case .off: Text("사용 안 함").font(Theme.font(13)).foregroundStyle(.tertiary)
             case .pending: Pill(text: "보낼 예정", icon: "clock", color: .gray)
+            case .done where received: Pill(text: "컴퓨터가 받음", icon: "checkmark", color: Theme.mint)
+            case .done where name.hasPrefix("iCloud"): Pill(text: "iCloud에 올림 · 맥 대기", icon: "icloud", color: Theme.blue)
             case .done: Pill(text: "보냄", icon: "checkmark", color: Theme.mint)
             case .failed: Pill(text: "다시 시도", icon: "exclamationmark.triangle", color: Theme.coral)
             }

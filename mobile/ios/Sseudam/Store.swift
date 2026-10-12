@@ -2,6 +2,8 @@ import Foundation
 import UIKit
 
 enum SyncState: String, Codable { case off, pending, done, failed }
+/// 아이폰 안 받아쓰기 상태: 대기·진행 중·끝·지원 안 함·실패
+enum SttState: String, Codable { case none, working, done, unavailable, failed }
 
 /// 기록 한 건: 녹음(audio) 또는 한 줄 메모(text). 파일 이름에 날짜·유형·메모가 들어가
 /// 컴퓨터의 쓰담이 시간표·학급을 알아서 판단한다. (예: "쓰담 20261012 1030 상담 2-3.m4a")
@@ -19,10 +21,22 @@ struct Entry: Codable, Identifiable, Equatable {
     var lastError: String = ""
     /// 저장한 시각 (녹음 시작 시각과 다름) — 보내기 전 고칠 시간 계산용
     var savedAt: Date? = nil
+    /// 아이폰에서 받아쓴 글 (녹음일 때)
+    var transcript: String = ""
+    var stt: SttState = .none
+    var sttNote: String = ""
+    /// 컴퓨터의 쓰담이 실제로 가져갔는지 (iCloud '처리완료' 폴더로 확인)
+    var received: Bool = false
 
     var isAudio: Bool { type == "audio" }
     var editableUntil: Date { (savedAt ?? createdAt).addingTimeInterval(Store.grace) }
-    var title: String { isAudio ? (memo.isEmpty ? "녹음 \(timeString(duration))" : memo) : text }
+    var title: String {
+        if !isAudio { return text }
+        if !memo.isEmpty { return memo }
+        if !transcript.isEmpty { return transcript }
+        return "녹음 \(timeString(duration))"
+    }
+    var sent: Bool { icloud == .done || google == .done }
 
     init(type: String, fileName: String, createdAt: Date, duration: Double = 0, kind: String = "수업", memo: String = "", text: String = "") {
         self.type = type; self.fileName = fileName; self.createdAt = createdAt
@@ -44,6 +58,10 @@ struct Entry: Codable, Identifiable, Equatable {
         google = try c.decodeIfPresent(SyncState.self, forKey: .google) ?? .off
         lastError = try c.decodeIfPresent(String.self, forKey: .lastError) ?? ""
         savedAt = try c.decodeIfPresent(Date.self, forKey: .savedAt)
+        transcript = try c.decodeIfPresent(String.self, forKey: .transcript) ?? ""
+        stt = try c.decodeIfPresent(SttState.self, forKey: .stt) ?? .none
+        sttNote = try c.decodeIfPresent(String.self, forKey: .sttNote) ?? ""
+        received = try c.decodeIfPresent(Bool.self, forKey: .received) ?? false
     }
 }
 
@@ -51,7 +69,7 @@ struct Entry: Codable, Identifiable, Equatable {
 final class Store: ObservableObject {
     static let shared = Store()
     /// 저장 직후 이 시간 동안은 보내지 않고 기다린다 (수업/상담·메모를 고칠 수 있게)
-    static let grace: TimeInterval = 20
+    nonisolated static let grace: TimeInterval = 20
 
     @Published var items: [Entry] = []
     @Published var icloudAvailable = false
@@ -86,6 +104,16 @@ final class Store: ObservableObject {
     var teacherName: String { defaults.string(forKey: "teacherName") ?? "" }
     var googlePaired: Bool { !googleURL.isEmpty && !googleToken.isEmpty }
     var autoSend: Bool { googlePaired || (useICloud && icloudAvailable) }
+    /// 컴퓨터의 쓰담이 한 번이라도 기록을 받아 갔는지 (구글 연결은 컴퓨터에서 QR을 띄워야 하므로 받은 것으로 봄)
+    var computerSeen: Bool {
+        get { googlePaired || defaults.bool(forKey: "computerSeen") }
+        set { defaults.set(newValue, forKey: "computerSeen"); objectWillChange.send() }
+    }
+    /// 아이폰에서 받아쓰기 (기본 켜짐)
+    var transcribeOnPhone: Bool {
+        get { defaults.object(forKey: "transcribeOnPhone") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "transcribeOnPhone"); objectWillChange.send() }
+    }
 
     static let folder: URL = {
         let d = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Recordings")
@@ -97,6 +125,14 @@ final class Store: ObservableObject {
     init() {
         load()
         icloudAvailable = FileManager.default.ubiquityIdentityToken != nil
+        // 켜져 있는 동안 30초마다 '컴퓨터가 받았는지' 확인
+        Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+            Task { @MainActor in await Store.shared.checkReceived() }
+        }
+        // 앱이 꺼져 끊긴 받아쓰기는 다시 시작
+        for e in items where e.isAudio && e.stt == .working {
+            transcribe(e)
+        }
     }
 
     func url(_ e: Entry) -> URL { Store.folder.appendingPathComponent(e.fileName) }
@@ -152,7 +188,35 @@ final class Store: ObservableObject {
         let kind = lastKind
         let fileName = uniqueFile(baseName(date: date, kind: kind, memo: ""), "m4a")
         try? FileManager.default.moveItem(at: tempFile, to: Store.folder.appendingPathComponent(fileName))
-        return newEntry(Entry(type: "audio", fileName: fileName, createdAt: date, duration: duration, kind: kind))
+        var e = Entry(type: "audio", fileName: fileName, createdAt: date, duration: duration, kind: kind)
+        if transcribeOnPhone { e.stt = .working }
+        let saved = newEntry(e)
+        if transcribeOnPhone { transcribe(saved) }
+        return saved
+    }
+
+    // MARK: 받아쓰기
+    /// 녹음을 아이폰 안에서 글자로 바꾸고, 받아쓴 글을 m4a에 넣어 둔다 (보내기는 끝날 때까지 기다림)
+    func transcribe(_ e: Entry) {
+        guard var cur = items.first(where: { $0.id == e.id }), cur.isAudio else { return }
+        cur.stt = .working; cur.sttNote = ""
+        update(cur)
+        Task {
+            let bg = UIApplication.shared.beginBackgroundTask(withName: "stt")
+            defer { UIApplication.shared.endBackgroundTask(bg) }
+            let outcome = await Transcriber.transcribe(url(cur))
+            guard var now = items.first(where: { $0.id == e.id }) else { return }
+            switch outcome {
+            case .text(let t):
+                now.transcript = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                now.stt = .done
+                if !now.transcript.isEmpty && !now.sent { _ = await Transcriber.embed(now.transcript, into: url(now)) }
+            case .unavailable(let m): now.stt = .unavailable; now.sttNote = m
+            case .failed(let m): now.stt = .failed; now.sttNote = m
+            }
+            update(now)
+            scheduleSync()
+        }
     }
 
     /// 한 줄 메모 저장 → 텍스트 파일로 컴퓨터에 전달
@@ -167,8 +231,14 @@ final class Store: ObservableObject {
     }
 
     /// 유형·메모 바꾸기. 아직 보내기 전이면 파일 이름도 바꿔 컴퓨터가 올바로 알아듣게 한다.
-    func edit(_ e: Entry, kind: String? = nil, memo: String? = nil, text: String? = nil) {
+    func edit(_ e: Entry, kind: String? = nil, memo: String? = nil, text: String? = nil, transcript: String? = nil) {
         guard var cur = items.first(where: { $0.id == e.id }) else { return }
+        if let t = transcript, cur.isAudio, t != cur.transcript, !cur.sent {
+            cur.transcript = t
+            update(cur)
+            let file = url(cur)
+            Task { _ = await Transcriber.embed(t, into: file) }
+        }
         if let k = kind { cur.kind = k; lastKind = k }
         if let m = memo { cur.memo = m }
         if let t = text, !cur.isAudio { cur.text = t; try? t.data(using: .utf8)?.write(to: url(cur)) }
@@ -215,6 +285,8 @@ final class Store: ObservableObject {
         let now = Date()
         for e in items {
             if !force && now < e.editableUntil { continue }  // 고칠 시간
+            // 받아쓰는 중이면 끝날 때까지 기다림 (10분 넘게 걸리면 소리만 먼저 보냄)
+            if e.stt == .working && now.timeIntervalSince(e.savedAt ?? e.createdAt) < 600 { continue }
             var cur = e
             if useICloud && icloudAvailable && [.pending, .failed, .off].contains(cur.icloud) {
                 do { try await Sync.copyToICloud(url(cur)); cur.icloud = .done }
@@ -233,7 +305,19 @@ final class Store: ObservableObject {
                 update(cur)
             }
         }
+        await checkReceived()
         cleanupOld()
+    }
+
+    /// 맥의 쓰담은 가져간 파일을 iCloud '쓰담/처리완료' 폴더로 옮긴다 → 그걸 보고 '컴퓨터가 받음'으로 표시
+    func checkReceived() async {
+        let waiting = items.filter { $0.icloud == .done && !$0.received }.map(\.fileName)
+        guard !waiting.isEmpty else { return }
+        let got = await Sync.receivedNames(Set(waiting))
+        guard !got.isEmpty else { return }
+        for i in items.indices where got.contains(items[i].fileName) { items[i].received = true }
+        save()
+        computerSeen = true
     }
 
     /// 선생님이 고른 경우에만, 컴퓨터로 전송이 끝난 기록을 휴대폰에서 지운다. 기본은 지우지 않음.

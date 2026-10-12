@@ -14,7 +14,9 @@ struct ConnectView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     computerPicker
+                    if store.autoSend && !store.computerSeen { waitingCard }
                     if store.computer == "mac" { macCards } else { windowsCards }
+                    sttCard
                     keepCard
                     linksCard
                 }
@@ -40,7 +42,41 @@ struct ConnectView: View {
                 choice("mac", "맥", "laptopcomputer")
                 choice("windows", "윈도우", "desktopcomputer")
             }
-        }.card()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+    }
+
+    /// 아직 컴퓨터가 한 번도 받아 가지 않았을 때
+    var waitingCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("컴퓨터의 쓰담을 기다리고 있어요", systemImage: "hourglass").font(Theme.font(16, .bold))
+                .foregroundStyle(Theme.ink)
+            Text("기록은 \(store.useICloud && store.icloudAvailable ? "iCloud" : "휴대폰")에 안전하게 쌓여 있어요. \(store.computer == "mac" ? "맥" : "컴퓨터")에 쓰담을 설치하고 켜면 쌓인 기록을 한꺼번에 가져가고, 기록함에 ‘컴퓨터가 받음’이 표시돼요.")
+                .font(Theme.font(14)).foregroundStyle(Theme.soft).fixedSize(horizontal: false, vertical: true)
+            Link(destination: URL(string: "https://hanseolhui.github.io/sseudam/")!) {
+                Label("컴퓨터용 쓰담 받기", systemImage: "arrow.down.circle.fill").font(Theme.font(15, .bold))
+                    .frame(maxWidth: .infinity).padding(.vertical, 11)
+                    .background(Theme.butter, in: Capsule()).foregroundStyle(.white)
+            }.buttonStyle(Squishy())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+    }
+
+    /// 아이폰 안 받아쓰기 켜고 끄기
+    var sttCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(get: { store.transcribeOnPhone }, set: { store.transcribeOnPhone = $0 })) {
+                Label("아이폰에서 바로 받아쓰기", systemImage: "text.bubble.fill").font(Theme.font(16, .bold))
+            }.tint(Theme.mint)
+            Text(Transcriber.supported
+                 ? "녹음이 끝나면 아이폰 안에서 글자로 바꿔 기록함에 함께 남겨요. 인터넷으로 나가지 않고, 받아쓴 글은 녹음과 함께 컴퓨터로 가요."
+                 : "이 아이폰은 기기 안 받아쓰기를 지원하지 않아요. 컴퓨터의 쓰담이 글자로 바꿔요.")
+                .font(Theme.font(12)).foregroundStyle(Theme.soft).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
     }
 
     func choice(_ id: String, _ title: String, _ icon: String) -> some View {
@@ -129,15 +165,21 @@ struct ConnectView: View {
 
     var keepCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("기록 보관", systemImage: "archivebox.fill").font(Theme.font(16, .bold))
-            Picker("휴대폰에 보관", selection: Binding(get: { store.deleteAfterDays }, set: { store.deleteAfterDays = $0 })) {
-                Text("계속 보관 (추천)").tag(0)
-                Text("보낸 뒤 180일 후 지우기").tag(180)
-                Text("보낸 뒤 90일 후 지우기").tag(90)
-            }.pickerStyle(.menu)
+            HStack {
+                Label("기록 보관", systemImage: "archivebox.fill").font(Theme.font(16, .bold))
+                Spacer()
+                Picker("휴대폰에 보관", selection: Binding(get: { store.deleteAfterDays }, set: { store.deleteAfterDays = $0 })) {
+                    Text("계속 보관 (추천)").tag(0)
+                    Text("보낸 뒤 180일 후 지우기").tag(180)
+                    Text("보낸 뒤 90일 후 지우기").tag(90)
+                }
+                .pickerStyle(.menu).labelsHidden()
+            }
             Text("학기말 생기부를 쓸 때까지 자동으로 지우지 않아요. 컴퓨터의 쓰담에도 원본이 그대로 보관돼요.")
-                .font(Theme.font(12)).foregroundStyle(Theme.soft)
-        }.card()
+                .font(Theme.font(12)).foregroundStyle(Theme.soft).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
     }
 
     var linksCard: some View {
@@ -153,6 +195,8 @@ struct ConnectView: View {
                 .font(Theme.font(12)).foregroundStyle(.tertiary)
         }
         .font(Theme.font(15, .semibold))
+        .labelStyle(AlignedLabel())
+        .frame(maxWidth: .infinity, alignment: .leading)
         .card()
     }
 
@@ -218,5 +262,15 @@ final class ScannerVC: UIViewController, AVCaptureMetadataOutputObjectsDelegate 
         done = true
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         onCode?(s)
+    }
+}
+
+/// 아이콘 폭을 맞춰 글자가 한 줄로 가지런히 서게 하는 라벨
+struct AlignedLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 12) {
+            configuration.icon.frame(width: 26)
+            configuration.title
+        }
     }
 }

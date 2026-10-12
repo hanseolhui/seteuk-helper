@@ -134,12 +134,17 @@ def _mark(source, ext_id, sig="", body="", rid=None):
 # ───────────────────────── 아이폰 내장 전사문 추출 ─────────────────────────
 
 def extract_iphone_transcript(path):
-    """iOS 18+ 음성메모는 받아쓴 내용을 m4a 안 'tsrp' 영역에 JSON으로 저장한다. 있으면 꺼낸다."""
+    """아이폰에서 받아쓴 글을 m4a 안에서 꺼낸다.
+    - 쓰담 앱: 가사(©lyr) 메타데이터에 받아쓴 글을 넣어 보낸다.
+    - iOS 18+ 음성메모: 'tsrp' 영역에 JSON으로 저장한다."""
     try:
         if os.path.getsize(path) > 400 * 1024 * 1024:
             return ""
         with open(path, "rb") as f:
             data = f.read()
+        text = _lyrics_text(data)
+        if text:
+            return text
         idx = data.find(b"tsrp")
         while idx != -1:
             size = int.from_bytes(data[idx - 4:idx], "big")
@@ -150,6 +155,19 @@ def extract_iphone_transcript(path):
             idx = data.find(b"tsrp", idx + 4)
     except Exception:  # noqa
         pass
+    return ""
+
+
+def _lyrics_text(data):
+    """MP4 ilst의 ©lyr 아톰: [크기]©lyr[크기]data[형식 4][로캘 4][UTF-8 글]"""
+    idx = data.find(b"\xa9lyr")
+    while idx != -1:
+        if data[idx + 8:idx + 12] == b"data":
+            dsize = int.from_bytes(data[idx + 4:idx + 8], "big")
+            text = data[idx + 20:idx + 4 + dsize].decode("utf-8", "ignore").strip()
+            if text:
+                return text
+        idx = data.find(b"\xa9lyr", idx + 4)
     return ""
 
 
