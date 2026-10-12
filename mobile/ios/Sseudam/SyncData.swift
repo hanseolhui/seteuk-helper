@@ -133,7 +133,7 @@ final class DataStore: ObservableObject {
         get { defaults.object(forKey: "useLocalAI") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "useLocalAI"); objectWillChange.send() }
     }
-    var localAIActive: Bool { useLocalAI && LocalAI.isReady }
+    var localAIActive: Bool { useLocalAI && AIRouter.available(.assignSentences) }
 
     /// 폰에서 받아쓴 글을 학생별로 나누기 (명단이 있을 때만)
     var splitOnPhone: Bool {
@@ -360,7 +360,8 @@ final class DataStore: ObservableObject {
             if let j = mentioned.firstIndex(where: { st in keys(st).contains { sen.contains($0) } }) { known[i] = j + 1 }
         }
         guard known.count < sentences.count else { return nil }   // 모든 문장에 이름이 있으면 AI 필요 없음
-        guard let owners = await LocalAI.owners(sentences: sentences, names: mentioned.map(\.displayName), known: known) else { return nil }
+        guard let engine = AIRouter.engine(for: .assignSentences),
+              let owners = try? await engine.assign(sentences: sentences, names: mentioned.map(\.displayName), known: known) else { return nil }
         // 이름이 나온 문장은 규칙을 믿고, 나머지만 AI 답을 쓴다
         var final: [(Int, Bool)] = sentences.indices.map { i in known[i].map { ($0, false) } ?? (owners[i], owners[i] != 0) }
         // 규칙 결과와 같으면 손대지 않음
