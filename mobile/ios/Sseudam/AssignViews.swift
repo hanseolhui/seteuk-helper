@@ -147,7 +147,8 @@ struct RecordingSplitSection: View {
             Text(n.content ?? "").font(Theme.font(15)).fixedSize(horizontal: false, vertical: true)
             if unsure {
                 HStack(spacing: 8) {
-                    Text("이름이 같은 학생이 있어요").font(Theme.font(12, .semibold)).foregroundStyle(Theme.butter)
+                    Text(data.isGuess(n) ? "✨ 기기 안 AI가 짐작했어요" : "이름이 같은 학생이 있어요")
+                        .font(Theme.font(12, .semibold)).foregroundStyle(Theme.butter)
                     Spacer()
                     Button("맞아요") { withAnimation(spring) { data.confirmNote(n) } }
                         .font(Theme.font(12, .bold)).padding(.horizontal, 10).padding(.vertical, 5)

@@ -17,6 +17,7 @@ struct ConnectView: View {
                     if store.autoSend && !store.computerSeen { waitingCard }
                     if store.computer == "mac" { macCards } else { windowsCards }
                     sttCard
+                    aiCard
                     lockCard
                     keepCard
                     linksCard
@@ -60,6 +61,22 @@ struct ConnectView: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 11)
                     .background(Theme.butter, in: Capsule()).foregroundStyle(.white)
             }.buttonStyle(Squishy())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+    }
+
+    /// 기기 안 AI
+    var aiCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(get: { DataStore.shared.useLocalAI }, set: { DataStore.shared.useLocalAI = $0; store.objectWillChange.send() })) {
+                Label("기기 안 AI로 더 똑똑하게 나누기", systemImage: "sparkles").font(Theme.font(16, .bold))
+            }
+            .tint(Theme.mint).disabled(!LocalAI.isReady)
+            Text("“그 친구는…”처럼 이름 없이 말한 문장도 누구 이야기인지 짐작해 담아요. 아이폰 안에서만 처리하고 밖으로 보내지 않아요. 짐작한 조각엔 ✨ 표시가 붙어요.")
+                .font(Theme.font(12)).foregroundStyle(Theme.soft).fixedSize(horizontal: false, vertical: true)
+            Text(LocalAI.stateText).font(Theme.font(12, .semibold))
+                .foregroundStyle(LocalAI.isReady ? Theme.mint : Theme.soft)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card()

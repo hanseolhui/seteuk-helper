@@ -32,6 +32,7 @@ struct Entry: Codable, Identifiable, Equatable {
     /// 학생 이름을 못 찾은 앞부분 (선생님이 학생을 골라 줄 수 있게)
     var splitLeftover: String = ""
     var splitUnsure: Int = 0
+    var aiRefined: Bool = false
 
     var isAudio: Bool { type == "audio" }
     var editableUntil: Date { (savedAt ?? createdAt).addingTimeInterval(Store.grace) }
@@ -70,6 +71,7 @@ struct Entry: Codable, Identifiable, Equatable {
         splitNames = try c.decodeIfPresent([String].self, forKey: .splitNames)
         splitLeftover = try c.decodeIfPresent(String.self, forKey: .splitLeftover) ?? ""
         splitUnsure = try c.decodeIfPresent(Int.self, forKey: .splitUnsure) ?? 0
+        aiRefined = try c.decodeIfPresent(Bool.self, forKey: .aiRefined) ?? false
     }
 }
 
@@ -253,6 +255,17 @@ final class Store: ObservableObject {
         cur.splitLeftover = r.leftover
         cur.splitUnsure = r.unsure
         update(cur)
+        // 지원 기기면 기기 안 AI로 이름 없는 문장까지 정리 (밖으로 나가는 것 없음)
+        if data.localAIActive && !r.names.isEmpty {
+            let id = cur.id, date = cur.createdAt, kind = cur.kind, source = cur.fileName, hint = cur.memo
+            Task {
+                guard let ai = await data.refineWithAI(text: text, date: date, kind: kind, source: source, hint: hint),
+                      var now = items.first(where: { $0.id == id }) else { return }
+                now.splitNames = ai.names; now.splitLeftover = ai.leftover; now.splitUnsure = ai.unsure
+                now.aiRefined = true
+                update(now)
+            }
+        }
     }
 
     /// 이름 없는 부분이 학생 이야기가 아니면 치우기 (원본 글은 그대로 남음)

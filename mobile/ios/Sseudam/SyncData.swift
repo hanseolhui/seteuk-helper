@@ -128,6 +128,13 @@ final class DataStore: ObservableObject {
         defaults.set(d, forKey: "deviceId")
         return d
     }()
+    /// 기기 안 AI로 이름 없는 문장까지 나누기 (지원 기기에서만)
+    var useLocalAI: Bool {
+        get { defaults.object(forKey: "useLocalAI") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "useLocalAI"); objectWillChange.send() }
+    }
+    var localAIActive: Bool { useLocalAI && LocalAI.isReady }
+
     /// 폰에서 받아쓴 글을 학생별로 나누기 (명단이 있을 때만)
     var splitOnPhone: Bool {
         get { defaults.object(forKey: "splitOnPhone") as? Bool ?? true }
@@ -329,8 +336,79 @@ final class DataStore: ObservableObject {
         return SplitResult(count: r.blocks.count, names: names, leftover: r.leftover, unsure: unsure)
     }
 
+    /// 기기 안 AI로 다시 나누기: 이름이 나온 문장은 규칙대로, 이름 없는 문장만 AI가
+    /// 그 녹음에 나온 학생 중에서 고르거나 '학생 이야기 아님'으로 둔다. 바뀐 게 없으면 nil.
+    func refineWithAI(text: String, date: Date, kind: String, source: String, hint: String) async -> SplitResult? {
+        guard localAIActive, hasRoster else { return nil }
+        let classes = activeClasses
+        let rule = Splitter.splitWithLeftover(text: text, hint: hint, classes: classes, studentsIn: { self.students(in: $0) },
+                                              preferKind: kind == "상담" ? "담임" : "교과")
+        // 등장한 학생 (순서대로, 중복 없이)
+        var mentioned: [SStudent] = []
+        for b in rule.blocks { if let s = student(b.studentUID), !mentioned.contains(where: { $0.uid == s.uid }) { mentioned.append(s) } }
+        guard !mentioned.isEmpty else { return nil }
+        let sentences = Splitter.sentences(Splitter.normalize(text))
+        guard sentences.count >= 2 else { return nil }
+        // 문장마다 규칙이 정한 주인: 그 문장에 학생 이름(또는 별칭·성 뺀 이름)이 직접 나오면 확정
+        func keys(_ s: SStudent) -> [String] {
+            var k = [s.displayName] + (s.aliases ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            if s.displayName.count >= 3 { k.append(String(s.displayName.dropFirst())) }
+            return k.filter { $0.count >= 2 }
+        }
+        var known: [Int: Int] = [:]
+        for (i, sen) in sentences.enumerated() {
+            if let j = mentioned.firstIndex(where: { st in keys(st).contains { sen.contains($0) } }) { known[i] = j + 1 }
+        }
+        guard known.count < sentences.count else { return nil }   // 모든 문장에 이름이 있으면 AI 필요 없음
+        guard let owners = await LocalAI.owners(sentences: sentences, names: mentioned.map(\.displayName), known: known) else { return nil }
+        // 이름이 나온 문장은 규칙을 믿고, 나머지만 AI 답을 쓴다
+        var final: [(Int, Bool)] = sentences.indices.map { i in known[i].map { ($0, false) } ?? (owners[i], owners[i] != 0) }
+        // 규칙 결과와 같으면 손대지 않음
+        let ruleBlocks = rule.blocks
+        // 이어지는 같은 학생 문장을 묶기
+        struct Piece { var owner: Int; var guessed: Bool; var text: String }
+        var pieces: [Piece] = []
+        var leftover: [String] = []
+        for (i, sen) in sentences.enumerated() {
+            let (o, g) = final[i]
+            if o == 0 { leftover.append(sen); continue }
+            if let last = pieces.last, last.owner == o, !(last.guessed != g && g) {
+                pieces[pieces.count - 1].text += " " + sen
+                pieces[pieces.count - 1].guessed = last.guessed || g
+            } else {
+                pieces.append(Piece(owner: o, guessed: g, text: sen))
+            }
+        }
+        final.removeAll()
+        let same = pieces.count == ruleBlocks.count && zip(pieces, ruleBlocks).allSatisfy { p, b in
+            mentioned[p.owner - 1].uid == b.studentUID && p.text.count == b.content.count
+        }
+        if same { return nil }
+        // 바꾸기: 이 녹음의 조각을 새로 담는다 (동명이인 표시는 규칙 결과에서 이어받음)
+        for n in notes(forSource: source) { tombstone(&notes, n.uid) }
+        var names: [String] = []
+        var unsure = 0
+        for p in pieces {
+            let s = mentioned[p.owner - 1]
+            var n = addNote(s, content: String(p.text.prefix(1200)), date: date, kind: kind, source: source)
+            if let rb = ruleBlocks.first(where: { $0.studentUID == s.uid && $0.ambiguous }) {
+                n.category = DataStore.unsureTag + ":" + rb.candidates.joined(separator: ","); unsure += 1
+            } else if p.guessed {
+                n.category = DataStore.guessTag + ":" + mentioned.map(\.uid).joined(separator: ","); unsure += 1
+            }
+            upsert(&notes, n)
+            if !names.contains(s.displayName) { names.append(s.displayName) }
+        }
+        changed()
+        let left = leftover.joined(separator: " ")
+        return SplitResult(count: pieces.count, names: names, leftover: left.count >= 6 ? left : "", unsure: unsure)
+    }
+
     // MARK: 바로잡기 — 다른 학생으로 옮기기 · 합치기 · 이름 고치기
-    func isUnsure(_ n: SNote) -> Bool { (n.category ?? "").hasPrefix(DataStore.unsureTag) }
+    /// 기기 안 AI가 이름 없는 문장의 주인을 짐작한 기록
+    static let guessTag = "AI추정"
+    func isUnsure(_ n: SNote) -> Bool { (n.category ?? "").hasPrefix(DataStore.unsureTag) || isGuess(n) }
+    func isGuess(_ n: SNote) -> Bool { (n.category ?? "").hasPrefix(DataStore.guessTag) }
     func candidates(_ n: SNote) -> [SStudent] {
         guard isUnsure(n), let list = n.category?.split(separator: ":").last else { return [] }
         return list.split(separator: ",").compactMap { student(String($0)) }

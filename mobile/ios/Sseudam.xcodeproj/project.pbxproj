@@ -15,6 +15,7 @@
 		3FA55CD3B5AC7F00AB35D199 /* AppLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F2CE36A4BB3BC47AA4D7B44 /* AppLock.swift */; };
 		52261A6115B359EC32412053 /* Recorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F955F5BA710F49B8D0B2DCF0 /* Recorder.swift */; };
 		64EC77FCADC55903F401479E /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A6FF75DAAEF58C8169B93BA /* Store.swift */; };
+		66248BE255EA0983C6CEC250 /* LocalAI.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB3F662A6402A5CB85D66D87 /* LocalAI.swift */; };
 		9265876BF8B55B69C3C77300 /* Splitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A3943703E4149A7920EC8DB /* Splitter.swift */; };
 		A0DBD6B3B9C43ED9F8A39AAF /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81BF9F702054C7D3E05CD87F /* OnboardingView.swift */; };
 		A25527A0C1C17C7A079951CC /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71366FB65970277E46A7A98E /* App.swift */; };
@@ -40,6 +41,7 @@
 		9BD0D2D816588F4CF251ACAC /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		AC3062820F22EC3F4C3D9B59 /* AssignViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssignViews.swift; sourceTree = "<group>"; };
 		AEA1284C4F15C899D71C7C32 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		BB3F662A6402A5CB85D66D87 /* LocalAI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAI.swift; sourceTree = "<group>"; };
 		C2BAE67B406D313F4E1BFD09 /* RecordsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsView.swift; sourceTree = "<group>"; };
 		CE147E1357C039411699FAD9 /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
 		EBF057AE1C9754955DF8AE06 /* Sseudam.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Sseudam.entitlements; sourceTree = "<group>"; };
@@ -74,6 +76,7 @@
 				CE147E1357C039411699FAD9 /* ConnectView.swift */,
 				9BD0D2D816588F4CF251ACAC /* HomeView.swift */,
 				605EF2F258552343BF899203 /* Info.plist */,
+				BB3F662A6402A5CB85D66D87 /* LocalAI.swift */,
 				81BF9F702054C7D3E05CD87F /* OnboardingView.swift */,
 				F955F5BA710F49B8D0B2DCF0 /* Recorder.swift */,
 				C2BAE67B406D313F4E1BFD09 /* RecordsView.swift */,
@@ -165,6 +168,7 @@
 				2CE9844BCEBC52E55B5405F8 /* AssignViews.swift in Sources */,
 				3461824010FB4D253F770882 /* ConnectView.swift in Sources */,
 				3CCC1D476D7F96DEB290DD9E /* HomeView.swift in Sources */,
+				66248BE255EA0983C6CEC250 /* LocalAI.swift in Sources */,
 				A0DBD6B3B9C43ED9F8A39AAF /* OnboardingView.swift in Sources */,
 				52261A6115B359EC32412053 /* Recorder.swift in Sources */,
 				B0708AF70260D3F3D0F6CBAC /* RecordsView.swift in Sources */,
@@ -216,7 +220,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 967DUR6926;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -277,7 +281,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 967DUR6926;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

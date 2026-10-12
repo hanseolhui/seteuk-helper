@@ -155,6 +155,23 @@ enum Splitter {
         return Result(blocks: out, leftover: lead.count >= 6 ? lead : "")
     }
 
+    /// 문장 나누기 (마침표·물음표·느낌표·줄바꿈)
+    static func sentences(_ text: String) -> [String] {
+        var out: [String] = []
+        var cur = ""
+        for ch in text {
+            cur.append(ch)
+            if ".?!。\n".contains(ch) {
+                let t = cur.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty { out.append(t) }
+                cur = ""
+            }
+        }
+        let t = cur.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { out.append(t) }
+        return out
+    }
+
     /// 한글 자모 단위 편집 거리 (초성·중성·종성)
     static func jamoDistance(_ a: String, _ b: String) -> Int {
         func jamo(_ s: String) -> [Int] {
