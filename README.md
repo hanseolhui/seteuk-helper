@@ -38,7 +38,7 @@ tools/release.sh 1.2.0 "바뀐 점 설명"
 | `SeteukHelper-mac.zip` | `install.sh` 한 줄 설치용 |
 | `seteuk-app.zip` | **앱 내 자동 업데이트용** (app/ 코드만) |
 | `whisper-cli-arm64.zip` | 예전 앱에 Whisper 실행 파일이 없을 때 받아감 |
-| `세특 녹음.shortcut`, `세특 받아쓰기.shortcut` | 아이폰 단축어 (빌드 시 `shortcuts sign`으로 서명 — 이 맥 iCloud 로그인 필요) |
+| `iPhone-Shortcuts.zip` | 아이폰 단축어 2개(한글 파일명 유지용 zip) (빌드 시 `shortcuts sign`으로 서명 — 이 맥 iCloud 로그인 필요) |
 
 앱 셸(.app)이 바뀌면 `version.py`의 `SHELL_REQUIRED`를 올립니다. 예전 셸에서 새 코드가 돌면 화면에 '새 앱으로 바꾸기'가 떠서 `SeteukHelper-mac.zip`을 받아 스스로 교체합니다.
 

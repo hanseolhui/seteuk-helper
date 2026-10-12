@@ -64,5 +64,11 @@ cp 사용설명서.md 프롬프트_모음.md "$STAGE/" 2>/dev/null || true
 hdiutil create -quiet -volname "세특도우미 $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DIST/SeteukHelper.dmg"
 
 # 6) 아이폰 단축어 (이 맥이 iCloud에 로그인돼 있어야 서명됨 — 실패해도 빌드는 계속)
-python3 tools/build_shortcuts.py || echo "⚠︎ 단축어 서명 실패 — 사용설명서의 수동 만들기 안내를 이용하세요"
+if python3 tools/build_shortcuts.py; then
+  # GitHub 첨부 파일 이름은 영문만 안전 → 한글 이름 단축어는 zip 안에 (아이폰은 파일 이름을 단축어 이름으로 씀)
+  (cd "$DIST" && mkdir -p "세특도우미 단축어" && mv "세특 녹음.shortcut" "세특 받아쓰기.shortcut" "세특도우미 단축어/" \
+     && ditto -c -k --norsrc --keepParent "세특도우미 단축어" iPhone-Shortcuts.zip && rm -rf "세특도우미 단축어")
+else
+  echo "⚠︎ 단축어 서명 실패 — 사용설명서의 수동 만들기 안내를 이용하세요"
+fi
 echo "완료: $DIST (버전 $VERSION)"; ls -la "$DIST"

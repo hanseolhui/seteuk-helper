@@ -16,6 +16,6 @@ git tag "v$V"
 git push origin HEAD --tags
 if [ -n "$NOTES" ]; then N=(--notes "$NOTES"); else N=(--generate-notes); fi
 ASSETS=(dist/SeteukHelper.dmg dist/SeteukHelper-mac.zip dist/seteuk-app.zip dist/whisper-cli-arm64.zip)
-for f in "dist/세특 녹음.shortcut" "dist/세특 받아쓰기.shortcut"; do [ -f "$f" ] && ASSETS+=("$f"); done
+[ -f dist/iPhone-Shortcuts.zip ] && ASSETS+=(dist/iPhone-Shortcuts.zip)
 gh release create "v$V" "${ASSETS[@]}" --title "세특도우미 $V" "${N[@]}"
 echo "배포 완료: v$V"
