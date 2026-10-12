@@ -15,6 +15,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -174,6 +175,8 @@ def inbox_dirs():
     import platform_util
     cands = [settings.get("inbox_dir") or "", os.path.join(platform_util.icloud_drive_dir(), "세특녹음")] + SHORTCUTS_DIRS \
         + [platform_util.icloud_container_dir(c) for c in RECORDER_CONTAINERS]
+    if platform_util.IS_WIN:  # iCloud for Windows는 앱 폴더를 앱 이름으로 보여 줄 수도 있음
+        cands += [os.path.join(platform_util.icloud_drive_dir(), n) for n in ("쓰담", "쓰담 녹음", "Shortcuts\\쓰담")]
     for d in cands:
         d = os.path.expanduser(d)
         if d and os.path.isdir(d) and d not in dirs:
@@ -201,7 +204,8 @@ def _scan_folder(folder):
         ext = os.path.splitext(name)[1].lower()
         if name.startswith(".") and name.endswith(".icloud"):
             # 아직 맥에 내려받지 않은 iCloud 파일 → 다운로드 요청 후 다음 검사 때 처리
-            os.system("brctl download %s >/dev/null 2>&1" % _shq(path))
+            if sys.platform == "darwin":
+                os.system("brctl download %s >/dev/null 2>&1" % _shq(path))
             continue
         if name.startswith(".") or not os.path.isfile(path) or ext not in AUDIO_EXTS | TEXT_EXTS:
             continue
@@ -418,6 +422,9 @@ def scan_notes(force=False):
 
 
 def notes_running():
+    import platform_util
+    if not platform_util.IS_MAC:
+        return False
     return subprocess.run(["pgrep", "-x", "Notes"], capture_output=True).returncode == 0
 
 
@@ -457,7 +464,9 @@ def _loop():
         except Exception as e:  # noqa
             print("가져오기 오류:", e)
         # 메모 앱: 열려 있으면 3분마다, 닫혀 있으면 30분마다 (열어야 iCloud 동기화가 됨)
-        if db.get_settings().get("notes_enabled") == "1" and (tick % 9 == 0) and (notes_running() or tick % 90 == 0):
+        import platform_util
+        if platform_util.IS_MAC and db.get_settings().get("notes_enabled") == "1" and (tick % 9 == 0) \
+                and (notes_running() or tick % 90 == 0):
             try:
                 with _scan_lock:
                     scan_notes()

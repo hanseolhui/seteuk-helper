@@ -19,10 +19,16 @@ def _support_root():
 
 
 def support_dir():
-    """프로그램 데이터 위치 (코드와 분리 → 업데이트·재설치해도 기록 보존). 예전 이름 폴더는 자동으로 옮긴다."""
-    new = os.path.join(_support_root(), APP_NAME)
-    _migrate_old_support(os.path.join(_support_root(), OLD_APP_NAME), new)
-    return new
+    """프로그램 데이터 위치 (코드와 분리 → 업데이트·재설치해도 기록 보존)."""
+    return os.path.join(_support_root(), APP_NAME)
+
+
+def migrate_support():
+    """예전 이름(세특도우미) 폴더를 새 위치로 옮긴다. 서버를 시작할 때만 호출 —
+    다른 스크립트가 모듈을 불러오기만 해서는 실제 데이터를 건드리지 않도록."""
+    if os.environ.get("SETEUK_DATA"):
+        return
+    _migrate_old_support(os.path.join(_support_root(), OLD_APP_NAME), support_dir())
 
 
 def _migrate_old_support(old, new):

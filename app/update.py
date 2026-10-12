@@ -118,9 +118,14 @@ def _cleanup_old(keep):
 
 
 def restart(server_path):
+    import platform_util
+
     def go():
         time.sleep(1.0)
         os.environ["SETEUK_NO_BROWSER"] = "1"
+        if platform_util.IS_WIN:  # 윈도우에는 진짜 execv가 없음 → 새 프로세스를 띄우고 종료
+            subprocess.Popen([sys.executable, server_path], env=dict(os.environ), creationflags=0x00000008 | 0x00000200)
+            os._exit(0)
         os.execv(sys.executable, [sys.executable, server_path])
     threading.Thread(target=go, daemon=True).start()
 

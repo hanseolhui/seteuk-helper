@@ -19,7 +19,7 @@ import gemini
 HF = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
 MODELS = [
     {"id": "turbo-q5", "file": "ggml-large-v3-turbo-q5_0.bin", "size": 574041195,
-     "label": "권장", "desc": "정확도 높음 · 550MB · 1시간 녹음에 M1 기준 약 10~20분 예상"},
+     "label": "권장", "desc": "정확도 높음 · 550MB · 1시간 녹음에 M1 맥 약 10~20분 (윈도우 일반 PC는 더 오래 걸릴 수 있음)"},
     {"id": "small-q5", "file": "ggml-small-q5_1.bin", "size": 190085487,
      "label": "가벼움", "desc": "빠르지만 이름·전문용어 정확도 낮음 · 190MB"},
     {"id": "turbo", "file": "ggml-large-v3-turbo.bin", "size": 1624555275,
@@ -34,17 +34,78 @@ _dl_lock = threading.Lock()
 
 
 def supported():
-    return platform.system() == "Darwin" and platform.machine() == "arm64"
+    import platform_util
+    if platform_util.IS_MAC:
+        return platform.machine() == "arm64"
+    if platform_util.IS_WIN:
+        return platform.machine().lower() in ("amd64", "x86_64")
+    return False
+
+
+def _exe(name):
+    import platform_util
+    return name + ".exe" if platform_util.IS_WIN else name
 
 
 def binary():
-    cands = [os.path.join(os.environ.get("SETEUK_BIN", ""), "whisper-cli"),
-             os.path.join(db.SUPPORT_DIR, "bin", "whisper-cli"),
-             os.path.join(db.BASE_DIR, "macos", "bin", "whisper-cli")]  # 개발 실행
+    name = _exe("whisper-cli")
+    cands = [os.path.join(os.environ.get("SETEUK_BIN", ""), name),
+             os.path.join(os.environ.get("SETEUK_BIN", ""), "whisper", name),
+             os.path.join(db.SUPPORT_DIR, "bin", name),
+             os.path.join(db.BASE_DIR, "macos", "bin", name)]  # 개발 실행
     for c in cands:
         if c and os.path.isfile(c) and os.access(c, os.X_OK):
             return c
     return None
+
+
+# 윈도우: 휴대폰 녹음(m4a)을 바꾸려면 ffmpeg가 필요 → 모델 내려받을 때 함께 받음
+FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+
+
+def ffmpeg():
+    name = _exe("ffmpeg")
+    for c in (os.path.join(os.environ.get("SETEUK_BIN", ""), name), os.path.join(db.SUPPORT_DIR, "bin", name)):
+        if c and os.path.isfile(c):
+            return c
+    return shutil.which("ffmpeg")
+
+
+def to_wav16k(src, dest):
+    """녹음을 Whisper가 읽는 16kHz 모노 WAV로 변환. 맥은 내장 afconvert, 윈도우는 ffmpeg."""
+    if shutil.which("afconvert"):
+        r = subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", src, dest], capture_output=True)
+    else:
+        ff = ffmpeg()
+        if not ff:
+            raise RuntimeError("오디오 변환 도구(ffmpeg)가 없습니다. 설정 → 받아쓰기 엔진에서 모델을 다시 내려받으면 함께 설치됩니다.")
+        r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", src, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", dest],
+                           capture_output=True, **_no_window())
+    if r.returncode != 0 or not os.path.exists(dest):
+        raise RuntimeError("오디오를 변환하지 못했습니다: %s" % r.stderr.decode("utf-8", "replace")[:200])
+
+
+def _no_window():
+    import platform_util
+    return {"creationflags": 0x08000000} if platform_util.IS_WIN else {}  # CREATE_NO_WINDOW
+
+
+def fetch_ffmpeg():
+    import zipfile
+    dest_dir = os.path.join(db.SUPPORT_DIR, "bin")
+    os.makedirs(dest_dir, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix="seteuk-ff-")
+    try:
+        z = os.path.join(tmp, "ff.zip")
+        req = urllib.request.Request(FFMPEG_URL, headers={"User-Agent": "sseudam"})
+        with urllib.request.urlopen(req, timeout=120, context=gemini._CTX) as resp, open(z, "wb") as f:
+            shutil.copyfileobj(resp, f)
+        with zipfile.ZipFile(z) as zf:
+            member = next(m for m in zf.namelist() if m.endswith("/bin/ffmpeg.exe"))
+            with zf.open(member) as src, open(os.path.join(dest_dir, "ffmpeg.exe"), "wb") as out:
+                shutil.copyfileobj(src, out)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def model_path(mid):
@@ -122,9 +183,13 @@ def download(mid):
 
     def run():
         try:
-            if not binary():  # 예전 앱(실행 파일 미포함) → 릴리스에서 받기
+            import platform_util
+            if not binary() and platform_util.IS_MAC:  # 예전 맥 앱(실행 파일 미포함) → 릴리스에서 받기
                 import update
                 update.fetch_whisper_binary(os.path.join(db.SUPPORT_DIR, "bin"))
+            if platform_util.IS_WIN and not ffmpeg():
+                _downloads[mid]["status"] = "downloading"
+                fetch_ffmpeg()
             vad = os.path.join(MODEL_DIR, VAD["file"])
             if not os.path.exists(vad):
                 _fetch(VAD["url"], vad, VAD["size"], None)
@@ -167,29 +232,24 @@ def _initial_prompt(students, kind):
 def transcribe(audio_path, students=None, kind="수업", on_progress=None, model_id=None):
     """녹음을 이 맥 안에서만 글자로 바꾼다 (외부 전송 없음)."""
     if not supported():
-        raise RuntimeError("Whisper 받아쓰기는 Apple Silicon(M1 이상) 맥에서만 됩니다.")
+        raise RuntimeError("이 컴퓨터에서는 Whisper 받아쓰기를 쓸 수 없습니다 (Apple Silicon 맥 또는 64비트 윈도우 필요).")
     exe = binary()
     if not exe:
         raise RuntimeError("Whisper 실행 파일이 없습니다. 쓰담을 최신 버전으로 다시 설치하세요.")
     mid = best_installed(model_id or db.get_settings().get("whisper_model"))
     if not mid:
         raise RuntimeError("Whisper 모델이 없습니다. 설정 → 받아쓰기 엔진에서 모델을 내려받으세요.")
-    if not shutil.which("afconvert"):
-        raise RuntimeError("오디오 변환 도구(afconvert)를 찾을 수 없습니다.")
     tmp = tempfile.mkdtemp(prefix="seteuk-wh-")
     try:
         wav = os.path.join(tmp, "a.wav")
-        r = subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", audio_path, wav],
-                           capture_output=True)
-        if r.returncode != 0:
-            raise RuntimeError("오디오를 변환하지 못했습니다: %s" % r.stderr.decode("utf-8", "replace")[:200])
+        to_wav16k(audio_path, wav)
         threads = max(2, min(8, (os.cpu_count() or 4) - 2))
         cmd = [exe, "-m", model_path(mid), "-f", wav, "-l", "ko", "-t", str(threads), "-pp",
                "--prompt", _initial_prompt(students or [], kind)]
         vad = os.path.join(MODEL_DIR, VAD["file"])
         if os.path.exists(vad):
             cmd += ["--vad", "-vm", vad]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **_no_window())
         err_tail = []
 
         def read_err():

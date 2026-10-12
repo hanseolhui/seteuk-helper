@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>쓰담 개인정보 처리방침</title>
+<style>
+:root{--bg:#fff;--text:#1d2330;--muted:#6b7384;--accent:#2f6fde;--line:#e2e5ea}
+@media (prefers-color-scheme:dark){:root{--bg:#15181e;--text:#e6e9ef;--muted:#9aa3b2;--accent:#6b9cf5;--line:#323843}}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.7 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+main{max-width:720px;margin:0 auto;padding:40px 16px 80px}h1{font-size:26px;margin:0 0 4px}h2{font-size:18px;margin:32px 0 8px}
+.muted{color:var(--muted);font-size:14px}a{color:var(--accent)}li{margin:4px 0}
+.box{border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:16px 0}
+</style></head><body><main>
+<h1>쓰담 개인정보 처리방침</h1>
+<p class="muted">적용 대상: 쓰담 (아이폰·안드로이드 녹음 앱, 맥·윈도우 프로그램) · 시행일 2026년 10월 12일</p>
+
+<div class="box"><b>요약</b> — 쓰담 개발자는 선생님이나 학생의 어떤 정보도 수집하거나 서버에 저장하지 않습니다. 녹음과 기록은 <b>선생님의 기기</b>와 선생님 <b>본인 계정의 iCloud·구글 드라이브</b>에만 저장됩니다.</div>
+
+<h2>1. 처리하는 정보와 저장 위치</h2>
+<ul>
+<li><b>녹음 파일</b>: 휴대폰 앱 안에 저장되고, 선생님이 켠 경우 선생님 본인의 iCloud Drive('쓰담' 폴더) 또는 선생님 본인의 구글 드라이브('쓰담 녹음함' 폴더)로 전송됩니다.</li>
+<li><b>학생 명단·관찰기록·초안</b>: 선생님 컴퓨터의 쓰담 프로그램 안(맥: ~/Library/Application Support/쓰담, 윈도우: %APPDATA%\쓰담)에만 저장됩니다. 선생님이 연결한 경우 선생님 본인의 구글시트·구글 드라이브에 사본과 백업이 저장됩니다.</li>
+<li><b>연결 정보</b>: 휴대폰 앱은 컴퓨터와 연결할 때 받은 '녹음 올리기 전용' 주소와 열쇠만 기기 안에 보관합니다. 이 열쇠로는 기록을 읽을 수 없습니다.</li>
+</ul>
+
+<h2>2. 개발자가 수집하는 정보</h2>
+<p>없습니다. 회원가입·로그인·광고·분석 도구·사용 통계·오류 보고 수집이 없으며, 개발자가 운영하는 서버로 어떤 데이터도 전송되지 않습니다.</p>
+
+<h2>3. 외부 서비스</h2>
+<ul>
+<li><b>Apple iCloud, Google 드라이브·시트</b>: 선생님이 직접 켜고 본인 계정으로 연결한 경우에만 사용되며, 각 회사의 개인정보 처리방침이 적용됩니다.</li>
+<li><b>받아쓰기</b>: 기본값은 컴퓨터 안에서 동작하는 음성 인식(Whisper)이라 녹음이 외부로 나가지 않습니다. 선생님이 설정에서 Google Gemini를 고른 경우에만 선생님 본인의 API 키로 Google에 전송됩니다.</li>
+<li><b>초안 작성 AI</b>: 선생님이 본인의 Gemini API 키를 넣거나, 프롬프트를 직접 Gemini·ChatGPT 웹에 붙여넣는 경우에만 해당 서비스로 전송됩니다.</li>
+</ul>
+
+<h2>4. 기기 권한</h2>
+<ul>
+<li><b>마이크</b>: 녹음을 위해 사용합니다. 선생님이 녹음 버튼을 누른 동안에만 녹음합니다.</li>
+<li><b>카메라</b>: 컴퓨터 화면의 연결 QR을 찍을 때만 사용하며, 사진을 저장하지 않습니다.</li>
+<li><b>알림(안드로이드)</b>: 화면이 꺼진 상태에서 녹음 중임을 표시합니다.</li>
+</ul>
+
+<h2>5. 보관과 삭제</h2>
+<p>녹음은 학기말 학교생활기록부 작성까지 보관할 수 있도록 자동으로 지우지 않습니다. 선생님이 앱·프로그램에서 직접 지우거나 앱을 삭제하면 기기 안의 데이터가 삭제됩니다. iCloud·구글 드라이브에 저장된 사본은 선생님이 해당 서비스에서 직접 지울 수 있습니다.</p>
+
+<h2>6. 학생 개인정보 보호 안내</h2>
+<p>쓰담은 교사의 학교생활기록부 작성을 돕는 도구입니다. 학생 개인정보는 소속 학교와 교육청의 개인정보 보호 지침에 따라 다뤄 주세요.</p>
+
+<h2>7. 문의</h2>
+<p><a href="https://github.com/hanseolhui/sseudam/issues">github.com/hanseolhui/sseudam/issues</a></p>
+</main></body></html>

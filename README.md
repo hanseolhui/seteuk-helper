@@ -19,11 +19,29 @@ curl -fsSL https://raw.githubusercontent.com/hanseolhui/sseudam/main/install.sh 
 ```
 또는 [Releases](https://github.com/hanseolhui/sseudam/releases/latest)의 `Sseudam.dmg`.
 
+## 구성
+
+| 폴더 | 내용 |
+|---|---|
+| `app/` | 파이썬 서버 + 웹 UI (맥·윈도우 공용, 앱 내 업데이트 단위) |
+| `macos/` | Swift 네이티브 셸, Whisper(Metal) 실행 파일, 빌드·공증 |
+| `windows/` | 실행기(launcher.pyw), NSIS 설치 프로그램, 빌드 (임베디드 파이썬 + whisper.cpp OpenBLAS) |
+| `mobile/ios/` | 아이폰 '쓰담' 녹음 앱 (SwiftUI, XcodeGen) — iCloud 컨테이너 + 구글 드라이브 업로드 |
+| `mobile/android/` | 안드로이드 '쓰담' 녹음 앱 (Kotlin, Compose) — 포그라운드 녹음 + WorkManager 업로드 |
+| `docs/` | GitHub Pages: 소개·개인정보 처리방침 |
+
 ## 개발
 ```bash
 python3 app/server.py          # http://127.0.0.1:8765 (데이터: ~/Library/Application Support/쓰담/data)
 SETEUK_DATA=/tmp/seteuk-test python3 app/server.py   # 테스트용 별도 데이터
 ```
+
+### 휴대폰 앱
+```bash
+cd mobile/ios && xcodegen generate && open Sseudam.xcodeproj        # 아이폰 (Xcode에 Apple ID 로그인 필요)
+cd mobile/android && ./gradlew bundleRelease                        # 안드로이드 (업로드 키: ~/.sseudam/keystore.properties)
+```
+안드로이드 업로드 키(`~/.sseudam/upload-keystore.jks`)는 저장소에 없습니다. 잃어버리면 Play 업데이트가 막히니 따로 백업하세요.
 
 ## 배포 (업데이트 내보내기)
 ```bash

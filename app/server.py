@@ -1127,10 +1127,20 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    platform_util.migrate_support()  # 예전 이름 폴더 → 쓰담 (서버 시작 때만)
     db.init()
-    try:
-        httpd = ThreadingHTTPServer((HOST, PORT), Handler)
-    except OSError:
+    httpd = None
+    for _ in range(12):
+        try:
+            httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+            break
+        except OSError:
+            if os.environ.get("SETEUK_APP") and _ < 11:
+                import time as _t
+                _t.sleep(0.5)  # 업데이트 재시작 중이면 이전 서버가 포트를 놓을 때까지 대기
+                continue
+            break
+    if httpd is None:
         print("이미 실행 중입니다.")
         if os.environ.get("SETEUK_NO_BROWSER") != "1":
             webbrowser.open("http://%s:%d" % (HOST, PORT))

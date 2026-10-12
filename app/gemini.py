@@ -179,6 +179,16 @@ def prepare_audio(path):
                            capture_output=True)
         if r.returncode == 0:
             return out, "audio/wav", True
+    if ext in NEEDS_CONVERT and not shutil.which("afconvert"):
+        try:
+            import whisper
+            if whisper.ffmpeg():
+                tmpdir = tempfile.mkdtemp(prefix="seteuk-")
+                out = os.path.join(tmpdir, "audio.wav")
+                whisper.to_wav16k(path, out)
+                return out, "audio/wav", True
+        except Exception:  # noqa
+            pass
     return path, MIME_BY_EXT.get(ext, "audio/mp4"), False
 
 

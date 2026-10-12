@@ -1,0 +1,13 @@
+{
+  "name": "쓰담",
+  "short_name": "쓰담",
+  "description": "말로 담고, 글로 씁니다",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#15181e",
+  "theme_color": "#2f6fde",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

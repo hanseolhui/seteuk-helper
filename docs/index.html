@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>쓰담 — 말로 담고, 글로 씁니다</title>
+<meta name="description" content="수업·상담 중 말로 남긴 학생 관찰을 학생별로 정리하고, 학기말 생기부 초안을 만드는 교사용 프로그램">
+<style>
+:root{--bg:#f5f6f8;--panel:#fff;--text:#1d2330;--muted:#6b7384;--accent:#2f6fde;--line:#e2e5ea}
+@media (prefers-color-scheme:dark){:root{--bg:#15181e;--panel:#1d2128;--text:#e6e9ef;--muted:#9aa3b2;--accent:#6b9cf5;--line:#323843}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+main{max-width:920px;margin:0 auto;padding:56px 16px 80px}
+.hero h1{font-size:44px;margin:0;color:var(--accent);letter-spacing:-1px}.hero p.tag{font-size:20px;margin:4px 0 18px;font-weight:600}
+.hero p{color:var(--muted);max-width:640px}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin:24px 0}
+.btn{display:inline-block;padding:12px 20px;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600}
+.btn.ghost{background:var(--panel);color:var(--text);border:1px solid var(--line)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:36px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}.card h3{margin:0 0 6px;font-size:17px}.card p{margin:0;color:var(--muted);font-size:15px}
+footer{margin-top:48px;color:var(--muted);font-size:14px}a{color:var(--accent)}
+</style></head><body><main>
+<section class="hero">
+<h1>쓰담</h1><p class="tag">말로 담고, 글로 씁니다</p>
+<p>수업과 상담 중에 "3번 김민수, 토론에서 근거를 세 가지 들어 반론을 폈음"처럼 말로 남기면, 학생별로 자동 정리되고 학기말 교과 세특·행동특성·창체 초안까지 만들어 주는 교사용 프로그램입니다.</p>
+<div class="btns">
+<a class="btn" href="https://github.com/hanseolhui/sseudam/releases/latest">맥용 내려받기</a>
+<a class="btn ghost" href="https://github.com/hanseolhui/sseudam/blob/main/사용설명서.md">사용설명서</a>
+</div>
+</section>
+<div class="grid">
+<div class="card"><h3>🎙 녹음만 하면 끝</h3><p>휴대폰 쓰담 앱이나 아이폰 음성메모로 녹음하면 iCloud·구글 드라이브로 컴퓨터에 자동 전달됩니다.</p></div>
+<div class="card"><h3>🔒 컴퓨터 안에서 받아쓰기</h3><p>음성 인식이 선생님 컴퓨터에서 동작해 녹음이 외부로 나가지 않습니다. 비용도 없습니다.</p></div>
+<div class="card"><h3>🧑‍🎓 학생별 자동 정리</h3><p>이름이 언급된 곳을 기준으로 학생별 관찰기록으로 나누고, 시간표로 학급을 자동 지정합니다.</p></div>
+<div class="card"><h3>📝 초안과 바이트 계산</h3><p>교과 세특·행동특성·자율·동아리·진로 영역별 초안, NEIS 바이트 계산, 기재 금지어 경고.</p></div>
+<div class="card"><h3>☁️ 자동 백업</h3><p>구글시트 자동 반영, 구글 드라이브 매일 백업, 엑셀 내보내기.</p></div>
+<div class="card"><h3>👩‍🏫 모든 선생님</h3><p>교과·담임·동아리 담당 선생님 모두. 지금 쓰는 Gemini·ChatGPT로도 쓸 수 있습니다.</p></div>
+</div>
+<footer>쓰담 · <a href="privacy.html">개인정보 처리방침</a> · <a href="https://github.com/hanseolhui/sseudam">GitHub</a></footer>
+</main></body></html>
