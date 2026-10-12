@@ -395,3 +395,80 @@ audio { width: 100%; margin: 8px 0; }
 .restart-box .dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-fill); animation: bob 1.2s ease-in-out infinite; }
 .restart-box .dots i:nth-child(2) { animation-delay: .15s; background: var(--brand-2); }
 .restart-box .dots i:nth-child(3) { animation-delay: .3s; background: var(--coral); }
+
+/* ───────── 귀여운 대시보드 차트 ───────── */
+.stats.fun .stat { overflow: hidden; }
+.pop { opacity: 0; transform: translateY(10px) scale(.97); }
+.animated .pop { animation: popIn .55s var(--ease) forwards; animation-delay: calc(var(--d, 0) * 70ms); }
+@keyframes popIn { to { opacity: 1; transform: none; } }
+
+.ring-stat { display: flex; align-items: center; gap: 12px; }
+.donut { position: relative; width: 74px; height: 74px; flex: none; }
+.donut svg { width: 100%; height: 100%; }
+.donut .ring { stroke-dashoffset: var(--full); transition: stroke-dashoffset 1.2s var(--ease) .25s; }
+.animated .donut .ring { stroke-dashoffset: var(--off); }
+.donut-in { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; line-height: 1; }
+.donut-in b { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.donut-in small { font-size: 11px; color: var(--muted); font-weight: 700; }
+.donut-txt .label { font-size: 13px; color: var(--muted); font-weight: 700; }
+.donut-txt .sub { font-size: 12px; }
+
+.dots { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 8px; max-width: 150px; }
+.dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); transform: scale(0); }
+.dots i.on { background: var(--accent-fill); }
+.animated .dots i { animation: dotPop .35s var(--ease) forwards; animation-delay: calc(300ms + var(--i) * 25ms); }
+@keyframes dotPop { 60% { transform: scale(1.3); } to { transform: scale(1); } }
+
+.spark { width: 100%; max-width: 140px; height: 30px; margin-top: 6px; overflow: visible; }
+.spark-line { fill: none; stroke: var(--butter); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
+.animated .spark-line { transition: stroke-dashoffset 1.2s var(--ease) .3s; stroke-dashoffset: 0; }
+.spark-dot { fill: var(--butter); opacity: 0; }
+.animated .spark-dot { animation: dotPop .4s var(--ease) 1.4s forwards; opacity: 1; transform-box: fill-box; transform-origin: center; }
+
+.minibar { height: 7px; border-radius: 99px; background: var(--line); margin-top: 10px; overflow: hidden; max-width: 150px; }
+.minibar i { display: block; height: 100%; width: 0; border-radius: 99px; transition: width 1s var(--ease) .3s; }
+.animated .minibar i { width: var(--w); }
+
+.class-progress { display: flex; flex-direction: column; gap: 10px; }
+.cp-row { display: block; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--panel-2); color: inherit; text-decoration: none;
+  transition: transform .15s var(--ease), box-shadow .15s; opacity: 0; transform: translateX(-8px); }
+.animated .cp-row { animation: popIn .5s var(--ease) forwards; animation-delay: calc(150ms + var(--d) * 80ms); }
+.cp-row:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+.cp-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.cp-party { margin-left: auto; animation: wiggle 1.6s ease-in-out infinite; display: inline-block; }
+@keyframes wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-12deg) scale(1.1); } 50% { transform: rotate(10deg); } }
+.gbar { position: relative; height: 12px; border-radius: 99px; background: var(--line); overflow: hidden; margin-top: 5px; }
+.gbar i { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 99px; background: var(--grad); transition: width 1.1s var(--ease); transition-delay: calc(250ms + var(--d, 0) * 80ms); }
+.gbar.mint i { background: var(--mint); }
+.animated .gbar i { width: var(--w); }
+.gbar em { position: absolute; right: 8px; top: -1px; font-size: 10px; font-style: normal; font-weight: 800; color: var(--muted); }
+
+.weekly .col { transform: scaleY(0); }
+.animated .weekly .col { animation: grow .7s var(--ease) forwards; animation-delay: calc(200ms + var(--i) * 45ms); }
+@keyframes grow { 70% { transform: scaleY(1.06); } to { transform: scaleY(1); } }
+.weekly .col rect { transition: filter .15s; }
+.weekly .col:hover rect { filter: brightness(1.08) saturate(1.1); }
+.weekly .col-num { font-size: 12px; font-weight: 800; fill: var(--accent); }
+.weekly .cur-label { font-weight: 800; fill: var(--accent); }
+.cheer { font-size: 13px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 4px 10px; border-radius: 99px; }
+
+.areabar { display: flex; height: 16px; border-radius: 99px; overflow: hidden; background: var(--line); gap: 2px; margin: 6px 0 8px; }
+.areabar i { width: 0; transition: width 1s var(--ease); transition-delay: calc(400ms + var(--i) * 90ms); }
+.animated .areabar i { width: var(--w); }
+.legend.wrap { flex-wrap: wrap; gap: 6px 12px; }
+
+.needy { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.needy-chip { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--panel-2); color: inherit; text-decoration: none; transition: transform .15s var(--ease); }
+.needy-chip:hover { transform: translateY(-2px) rotate(-.5deg); }
+.needy-chip b { display: block; font-size: 14px; }
+.needy-chip small { color: var(--muted); font-size: 11px; }
+.nc-face { font-size: 20px; }
+.nc-count { margin-left: auto; min-width: 26px; height: 26px; border-radius: 50%; display: grid; place-content: center; font-weight: 800; font-size: 12px; background: var(--amber-soft); color: var(--amber); }
+.nc-count.zero { background: var(--red-soft); color: var(--red); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pop, .cp-row { opacity: 1; transform: none; animation: none !important; }
+  .dots i, .weekly .col { transform: none; animation: none !important; }
+  .donut .ring, .gbar i, .areabar i, .minibar i, .spark-line { transition: none !important; }
+  .cp-party { animation: none; }
+}

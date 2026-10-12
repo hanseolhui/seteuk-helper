@@ -379,40 +379,45 @@ async function viewDashboard() {
     <div class="page-head"><div><h1>${teacherHello()}</h1><div class="muted">${new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} · ${termLabel(state.term)}</div></div>
       <div class="actions"><button id="dash-xlsx">전체 엑셀로 저장</button><a class="btn primary" href="#/recordings">+ 녹음 올리기</a></div></div>
     <div id="wh-banner"></div>
-    <div class="stats">
-      <div class="stat"><div class="label">학생</div><div class="value">${t.students}</div><div class="sub">${t.classes}개 학급</div></div>
-      <div class="stat"><div class="label">녹음·기록</div><div class="value">${t.recordings}</div><div class="sub">${t.pending_review ? `<a href="#/recordings">확인 필요 ${t.pending_review}건</a>` : '모두 처리됨'}</div></div>
-      <div class="stat"><div class="label">관찰기록</div><div class="value">${t.notes}</div><div class="sub">학생당 평균 ${t.students ? (t.notes / t.students).toFixed(1) : 0}건</div></div>
-      <div class="stat"><div class="label">기록 있는 학생</div><div class="value">${pct(t.with_notes, t.students)}%</div><div class="sub">${t.with_notes} / ${t.students}명</div></div>
-      <div class="stat"><div class="label">세특 초안</div><div class="value">${pct(t.drafted, t.students)}%</div><div class="sub">확정 ${t.finalized}명</div></div>
+    <div class="stats fun">
+      <div class="stat pop" style="--d:0">
+        <div class="label">👩‍🎓 학생</div><div class="value" data-count="${t.students}">0</div>
+        <div class="sub">${t.classes}개 학급</div>${peopleDots(t.students, t.with_notes)}</div>
+      <div class="stat pop" style="--d:1">
+        <div class="label">🎙 녹음·기록</div><div class="value" data-count="${t.recordings}">0</div>
+        <div class="sub">${t.pending_review ? `<a href="#/recordings">확인 필요 ${t.pending_review}건</a>` : '모두 처리됨 ✓'}</div>${sparkline(d.weeks.map(w => w['수업'] + w['상담']))}</div>
+      <div class="stat pop" style="--d:2">
+        <div class="label">📝 관찰기록</div><div class="value" data-count="${t.notes}">0</div>
+        <div class="sub">학생당 평균 ${t.students ? (t.notes / t.students).toFixed(1) : 0}건</div>${miniBar(t.students ? t.notes / t.students : 0, 10, 'var(--mint)')}</div>
+      <div class="stat pop ring-stat" style="--d:3">
+        ${donut(pct(t.with_notes, t.students), 'url(#gradBrand)', '기록 있는 학생', `${t.with_notes}/${t.students}명`)}</div>
+      <div class="stat pop ring-stat" style="--d:4">
+        ${donut(pct(t.drafted, t.students), 'var(--mint)', '세특 초안', `확정 ${t.finalized}명`)}</div>
     </div>
     <div class="grid grid-2">
       <div class="card">
         <div class="section-title"><h2>학급별 진행</h2><div class="legend"><span><i style="background:var(--grad)"></i>기록 있음</span><span><i style="background:var(--mint)"></i>초안 작성</span></div></div>
-        <div class="table-wrap" style="border:none"><table>
-          <thead><tr><th>학급</th><th class="right">학생</th><th class="right">기록</th><th style="width:38%">진행률</th></tr></thead>
-          <tbody>${d.classes.map(c => `<tr class="clickable" data-href="#/drafts/${c.id}">
-            <td><b>${esc(c.label)}</b><div class="small muted">${c.year}년 ${c.semester}학기 · 녹음 ${c.recordings}</div></td>
-            <td class="num">${c.students}</td><td class="num">${c.notes}</td>
-            <td><div class="bar" title="기록 있는 학생 ${c.with_notes}명"><div class="b1" style="width:${pct(c.with_notes, c.students)}%"></div></div>
-                <div class="bar" style="margin-top:4px" title="초안 작성 ${c.drafted}명"><div class="b2" style="width:${pct(c.drafted, c.students)}%"></div></div>
-                <div class="small muted">기록 ${c.with_notes}/${c.students} · 초안 ${c.drafted}/${c.students} · 확정 ${c.finalized}</div></td></tr>`).join('')}
-          </tbody></table></div>
+        <div class="class-progress">${d.classes.map((c, i) => {
+          const a = pct(c.with_notes, c.students), b = pct(c.drafted, c.students);
+          return `<a class="cp-row" href="#/drafts/${c.id}" style="--d:${i}">
+            <div class="cp-head"><b>${esc(c.label)}</b><span class="small muted">학생 ${c.students} · 기록 ${c.notes} · 녹음 ${c.recordings}</span>${a === 100 && c.students ? '<span class="cp-party" title="모든 학생 기록 완료!">🎉</span>' : ''}</div>
+            <div class="gbar"><i style="--w:${a}%"></i><em>${a}%</em></div>
+            <div class="gbar mint"><i style="--w:${b}%"></i><em>${b}%</em></div></a>`;
+        }).join('')}</div>
       </div>
       <div class="card chart">
-        <div class="section-title"><h2>주간 관찰기록</h2><div class="legend"><span><i style="background:var(--accent-fill)"></i>수업</span><span><i style="background:var(--coral)"></i>상담</span></div></div>
+        <div class="section-title"><h2>주간 관찰기록</h2>${weekCheer(d.weeks)}</div>
         ${weeklyChart(d.weeks)}
         <h3 style="margin-top:16px">영역 분포</h3>
-        <div class="chips">${d.categories.map(c => `<span class="badge blue">${esc(c.category)} ${c.n}</span>`).join('') || '<span class="muted small">아직 기록이 없습니다</span>'}</div>
+        ${areaBar(d.categories)}
       </div>
       <div class="card">
         <h2>기록이 부족한 학생</h2>
         <p class="help" style="margin-top:-6px;margin-bottom:10px">다음 수업에서 관찰해 보면 좋은 학생들입니다.</p>
         ${d.needy.length ? '' : '<p class="muted small">아직 학생이 없어요</p>'}
-        <table><tbody>${d.needy.map(s => `<tr class="clickable" data-href="#/student/${s.id}">
-          <td>${esc(s.label)}</td><td>${s.number}번 <b>${esc(s.name)}</b></td>
-          <td class="right"><span class="badge ${s.notes ? 'amber' : 'red'}">기록 ${s.notes}건</span></td>
-          <td class="small muted nowrap">${s.last_date ? '최근 ' + esc(s.last_date) : ''}</td></tr>`).join('')}</tbody></table>
+        <div class="needy">${d.needy.map((s, i) => `<a class="needy-chip pop" style="--d:${i}" href="#/student/${s.id}" title="${esc(s.label)}${s.last_date ? ' · 최근 ' + esc(s.last_date) : ''}">
+          <span class="nc-face">${s.notes ? '🌿' : '🌱'}</span><span><b>${esc(s.name)}</b><small>${esc(s.label)} · ${s.number}번</small></span>
+          <span class="nc-count ${s.notes ? '' : 'zero'}">${s.notes}</span></a>`).join('')}</div>
       </div>
       <div class="card">
         <div class="section-title"><h2>최근 녹음</h2><a href="#/recordings" class="small">전체 보기</a></div>
@@ -424,6 +429,81 @@ async function viewDashboard() {
   bindRowLinks();
   $('#dash-xlsx').onclick = () => exportXlsx(null);
   whisperBanner($('#wh-banner'));
+  animateIn(view);
+}
+
+// ───────── 귀여운 차트 (SVG + CSS 애니메이션, 외부 라이브러리 없음) ─────────
+const REDUCED = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** 숫자가 0부터 톡톡 올라가고, 막대·링이 차오르게 */
+function animateIn(root) {
+  $$('[data-count]', root).forEach(el => {
+    const to = +el.dataset.count || 0;
+    if (REDUCED || to === 0) { el.textContent = to.toLocaleString(); return; }
+    const t0 = performance.now(), dur = 900 + Math.min(600, to * 6);
+    const step = now => {
+      const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = Math.round(to * e).toLocaleString();
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add('animated')));
+}
+
+const SVG_DEFS = `<defs><linearGradient id="gradBrand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5B7CFA"/><stop offset="1" stop-color="#9B8CF5"/></linearGradient>
+  <linearGradient id="gradCol" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#5B7CFA"/><stop offset="1" stop-color="#9B8CF5"/></linearGradient></defs>`;
+
+/** 도넛 링: 가운데 % 가 함께 올라감 */
+function donut(p, color, label, sub) {
+  const r = 30, c = 2 * Math.PI * r;
+  const face = p >= 100 ? '🎉' : p >= 60 ? '😊' : p >= 30 ? '🙂' : '🌱';
+  return `<div class="donut"><svg viewBox="0 0 80 80" aria-hidden="true">${SVG_DEFS}
+      <circle cx="40" cy="40" r="${r}" fill="none" stroke="var(--line)" stroke-width="9"/>
+      <circle class="ring" cx="40" cy="40" r="${r}" fill="none" stroke="${color}" stroke-width="9" stroke-linecap="round"
+        stroke-dasharray="${c}" style="--off:${c * (1 - p / 100)};--full:${c}" transform="rotate(-90 40 40)"/></svg>
+      <div class="donut-in"><b data-count="${p}">0</b><small>%</small></div></div>
+    <div class="donut-txt"><div class="label">${label} ${face}</div><div class="sub">${sub}</div></div>`;
+}
+
+/** 학생 수만큼 동그라미 (기록 있는 학생은 색칠) — 최대 30개 */
+function peopleDots(total, filled) {
+  const n = Math.min(total, 30);
+  if (!n) return '';
+  const on = Math.round(filled * n / Math.max(1, total));
+  return `<div class="dots" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i class="${i < on ? 'on' : ''}" style="--i:${i}"></i>`).join('')}</div>`;
+}
+
+/** 주간 합계 미니 선 그래프 */
+function sparkline(vals) {
+  if (!vals.length) return '';
+  const W = 120, H = 30, max = Math.max(1, ...vals);
+  const pts = vals.map((v, i) => [i * W / (vals.length - 1 || 1), H - 3 - (H - 6) * v / max]);
+  const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const last = pts[pts.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path class="spark-line" d="${d}" pathLength="1"/>
+    <circle class="spark-dot" cx="${last[0]}" cy="${last[1]}" r="3.2"/></svg>`;
+}
+
+function miniBar(v, max, color) {
+  return `<div class="minibar" aria-hidden="true"><i style="--w:${Math.min(100, v / max * 100)}%;background:${color}"></i></div>`;
+}
+
+/** 이번 주 응원 한마디 */
+function weekCheer(weeks) {
+  const n = weeks.length ? weeks[weeks.length - 1]['수업'] + weeks[weeks.length - 1]['상담'] : 0;
+  const prev = weeks.length > 1 ? weeks[weeks.length - 2]['수업'] + weeks[weeks.length - 2]['상담'] : 0;
+  const msg = n === 0 ? '이번 주 첫 기록을 담아 볼까요? 🌱' : n > prev ? `이번 주 ${n}개! 지난주보다 늘었어요 📈` : `이번 주 ${n}개 담았어요 ✨`;
+  return `<span class="cheer">${msg}</span>`;
+}
+
+/** 영역 분포: 알록달록 한 줄 막대 + 범례 */
+function areaBar(cats) {
+  if (!cats || !cats.length) return '<span class="muted small">아직 기록이 없습니다</span>';
+  const total = cats.reduce((a, c) => a + c.n, 0) || 1;
+  const colors = ['var(--accent-fill)', 'var(--violet)', 'var(--mint)', 'var(--butter)', 'var(--coral)', '#7CC4F5', '#C9A7F5'];
+  return `<div class="areabar">${cats.map((c, i) => `<i style="--w:${c.n / total * 100}%;background:${colors[i % colors.length]};--i:${i}" title="${esc(c.category)} ${c.n}건"></i>`).join('')}</div>
+    <div class="legend wrap">${cats.map((c, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${esc(c.category)} ${c.n}</span>`).join('')}</div>`;
 }
 
 function teacherHello() {
@@ -434,24 +514,29 @@ function teacherHello() {
 }
 
 function weeklyChart(weeks) {
-  const W = 560, H = 190, pad = { l: 28, r: 8, t: 10, b: 24 };
+  const W = 560, H = 200, pad = { l: 28, r: 8, t: 14, b: 24 };
   const max = Math.max(4, ...weeks.map(w => w['수업'] + w['상담']));
   const step = Math.ceil(max / 4);
   const top = step * 4;
   const bw = (W - pad.l - pad.r) / weeks.length;
   const y = v => pad.t + (H - pad.t - pad.b) * (1 - v / top);
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="주간 관찰기록 수">`;
+  let s = `<svg class="weekly" viewBox="0 0 ${W} ${H}" role="img" aria-label="주간 관찰기록 수">${SVG_DEFS}`;
   for (let i = 0; i <= 4; i++) {
     const v = step * i;
-    s += `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/>`;
+    s += `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1" stroke-dasharray="${i ? '3 4' : ''}"/>`;
     s += `<text x="${pad.l - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
   }
   weeks.forEach((w, i) => {
-    const x = pad.l + i * bw + bw * 0.18, bwi = bw * 0.64;
-    const a = w['수업'], b = w['상담'];
-    if (a) s += `<rect x="${x}" y="${y(a)}" width="${bwi}" height="${y(0) - y(a)}" rx="4" fill="var(--accent-fill)"><title>${w.label} 주 수업 ${a}건</title></rect>`;
-    if (b) s += `<rect x="${x}" y="${y(a + b)}" width="${bwi}" height="${y(a) - y(a + b)}" rx="2" fill="var(--coral)"><title>${w.label} 주 상담 ${b}건</title></rect>`;
-    if (i % 2 === weeks.length % 2 || i === weeks.length - 1) s += `<text x="${x + bwi / 2}" y="${H - 6}" text-anchor="middle">${w.label}</text>`;
+    const x = pad.l + i * bw + bw * 0.2, bwi = bw * 0.6;
+    const a = w['수업'], b = w['상담'], tot = a + b;
+    const cur = i === weeks.length - 1;
+    s += `<g class="col ${cur ? 'cur' : ''}" style="--i:${i};transform-origin:${x + bwi / 2}px ${y(0)}px">`;
+    if (a) s += `<rect x="${x}" y="${y(a)}" width="${bwi}" height="${y(0) - y(a)}" rx="${Math.min(8, bwi / 2)}" fill="url(#gradCol)"><title>${w.label} 주 수업 ${a}건</title></rect>`;
+    if (b) s += `<rect x="${x}" y="${y(tot)}" width="${bwi}" height="${y(a) - y(tot)}" rx="${Math.min(8, bwi / 2)}" fill="var(--coral)"><title>${w.label} 주 상담 ${b}건</title></rect>`;
+    if (!tot) s += `<circle cx="${x + bwi / 2}" cy="${y(0) - 4}" r="2.5" fill="var(--line-strong)"/>`;
+    if (tot && cur) s += `<text class="col-num" x="${x + bwi / 2}" y="${y(tot) - 6}" text-anchor="middle">${tot}</text>`;
+    s += `</g>`;
+    if (i % 2 === weeks.length % 2 || cur) s += `<text x="${x + bwi / 2}" y="${H - 6}" text-anchor="middle" class="${cur ? 'cur-label' : ''}">${cur ? '이번 주' : w.label}</text>`;
   });
   return s + '</svg>';
 }

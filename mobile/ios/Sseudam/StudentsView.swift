@@ -471,8 +471,9 @@ struct StudentDetail: View {
             HStack(spacing: 10) {
                 stat("\(ns.count)", "모인 기록", Theme.blue)
                 stat("\(month)", "최근 30일", Theme.mint)
-                stat("\(talks)", "상담", Theme.lavender)
+                if Features.counseling { stat("\(talks)", "상담", Theme.lavender) }
             }
+            WeekBars(dates: ns.compactMap(\.date))
             if let f = dates.first, let l = dates.last {
                 Text("\(friendlyDate(f))부터 \(friendlyDate(l))까지 · 마지막 기록 \(friendlyDate(l))")
                     .font(Theme.font(12)).foregroundStyle(Theme.soft)
@@ -645,4 +646,54 @@ struct ShareSheet: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: [url], applicationActivities: nil)
     }
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
+
+/// 최근 8주 기록 막대 — 화면에 나오면 아래에서 쏙쏙 자라남
+struct WeekBars: View {
+    var dates: [String]
+    @State private var grown = false
+
+    var weeks: [(label: String, n: Int)] {
+        let cal = Calendar(identifier: .gregorian)
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
+        let today = Date()
+        let monday = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: today)) ?? today
+        return (0..<8).reversed().map { i in
+            let start = cal.date(byAdding: .day, value: -7 * i, to: monday)!
+            let end = cal.date(byAdding: .day, value: 7, to: start)!
+            let n = dates.compactMap { f.date(from: String($0.prefix(10))) }.filter { $0 >= start && $0 < end }.count
+            let lf = DateFormatter(); lf.dateFormat = "M/d"
+            return (i == 0 ? "이번 주" : lf.string(from: start), n)
+        }
+    }
+
+    var body: some View {
+        let w = weeks
+        let maxN = max(1, w.map(\.n).max() ?? 1)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("최근 8주").font(Theme.font(12, .bold)).foregroundStyle(Theme.soft)
+            HStack(alignment: .bottom, spacing: 6) {
+                ForEach(Array(w.enumerated()), id: \.offset) { i, item in
+                    VStack(spacing: 4) {
+                        if item.n > 0 && i == w.count - 1 {
+                            Text("\(item.n)").font(Theme.font(11, .heavy)).foregroundStyle(Theme.blue)
+                        }
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(item.n == 0 ? AnyShapeStyle(Color.gray.opacity(0.15))
+                                  : (i == w.count - 1 ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Theme.blue.opacity(0.55))))
+                            .frame(height: grown ? max(6, 64 * CGFloat(item.n) / CGFloat(maxN)) : 4)
+                            .animation(.spring(response: 0.55, dampingFraction: 0.6).delay(Double(i) * 0.05), value: grown)
+                        Text(item.label).font(Theme.font(9, i == w.count - 1 ? .bold : .regular))
+                            .foregroundStyle(i == w.count - 1 ? Theme.blue : Theme.soft).lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(item.label) 기록 \(item.n)개")
+                }
+            }
+            .frame(height: 96, alignment: .bottom)
+        }
+        .onAppear { grown = true }
+    }
 }
