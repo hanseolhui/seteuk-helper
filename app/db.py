@@ -38,6 +38,16 @@ DEFAULT_SETTINGS = {
     "period_times": "09:00-09:50\n10:00-10:50\n11:00-11:50\n12:00-12:50\n13:40-14:30\n14:40-15:30\n15:40-16:30",
     "timetable": "{}",              # {"1-3": 학급id} = 월요일 3교시
     "update_check": "1",
+    # 받아쓰기 엔진: whisper(기본, 내 맥 안에서만) | gemini(외부 전송)
+    "stt_engine": "whisper",
+    "whisper_model": "",
+    # 구글시트 자동 동기화 + 구글 드라이브 백업
+    "sheets_auto": "1",
+    "drive_backup": "1",
+    "sheets_last_hash": "",
+    "sheets_last_sync": "",
+    "sheets_last_error": "",
+    "drive_last_backup": "",
 }
 
 SCHEMA = """

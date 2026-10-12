@@ -16,6 +16,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import subprocess
 import zipfile
 
 import db
@@ -122,3 +123,108 @@ def restart(server_path):
         os.environ["SETEUK_NO_BROWSER"] = "1"
         os.execv(sys.executable, [sys.executable, server_path])
     threading.Thread(target=go, daemon=True).start()
+
+
+# ───────────────────────── 앱 셸(.app) 업데이트 ─────────────────────────
+
+def shell_version():
+    try:
+        return int(os.environ.get("SETEUK_SHELL") or 1)
+    except ValueError:
+        return 1
+
+
+def shell_outdated():
+    return shell_version() < version.SHELL_REQUIRED
+
+
+def _installed_app_path():
+    p = os.environ.get("SETEUK_APP_PATH")
+    if p and p.endswith(".app"):
+        return p
+    # 앱 번들 안 코드로 실행 중이면 그 번들
+    here = os.path.abspath(os.path.join(db.APP_DIR, "..", "..", ".."))
+    if here.endswith(".app"):
+        return here
+    for c in ("/Applications/세특도우미.app", os.path.expanduser("~/Applications/세특도우미.app")):
+        if os.path.isdir(c):
+            return c
+    return "/Applications/세특도우미.app"
+
+
+def _asset_url(name):
+    resp = _get("https://api.github.com/repos/%s/releases/latest" % version.UPDATE_REPO)
+    rel = json.loads(resp.read().decode("utf-8"))
+    a = next((x for x in rel.get("assets", []) if x.get("name") == name), None)
+    if not a:
+        raise ValueError("최신 릴리스에 %s 파일이 없습니다." % name)
+    return a["browser_download_url"], a.get("digest") or ""
+
+
+def _download(url, dest, digest=""):
+    with _get(url, timeout=300) as resp, open(dest, "wb") as f:
+        shutil.copyfileobj(resp, f)
+    if digest.startswith("sha256:"):
+        h = hashlib.sha256()
+        with open(dest, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        if h.hexdigest() != digest.split(":", 1)[1]:
+            raise ValueError("내려받은 파일이 손상되었습니다. 다시 시도하세요.")
+
+
+def install_app():
+    """최신 세특도우미.app 을 받아 설치 위치에 교체하고, 새 앱을 실행한 뒤 지금 서버를 끝낸다."""
+    url, digest = _asset_url(version.APP_ASSET)
+    target = _installed_app_path()
+    parent = os.path.dirname(target)
+    if not os.access(parent, os.W_OK):
+        parent = os.path.expanduser("~/Applications")
+        os.makedirs(parent, exist_ok=True)
+        target = os.path.join(parent, "세특도우미.app")
+    tmp = tempfile.mkdtemp(prefix="seteuk-app-")
+    zpath = os.path.join(tmp, "app.zip")
+    _download(url, zpath, digest)
+    r = subprocess.run(["ditto", "-x", "-k", zpath, tmp], capture_output=True)
+    new_app = os.path.join(tmp, "세특도우미.app")
+    if r.returncode != 0 or not os.path.isdir(new_app):
+        raise ValueError("앱 파일을 풀지 못했습니다.")
+    old = target + ".old"
+    shutil.rmtree(old, ignore_errors=True)
+    if os.path.exists(target):
+        os.rename(target, old)
+    try:
+        shutil.move(new_app, target)
+    except Exception:
+        if os.path.exists(old):
+            os.rename(old, target)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
+    shutil.rmtree(tmp, ignore_errors=True)
+    # 지금 서버가 내려간 뒤 새 앱이 서버를 새로 띄우도록 잠시 뒤 실행
+    subprocess.Popen(["/bin/bash", "-c", "sleep 2; open %s" % shlex_quote(target)], start_new_session=True)
+    threading.Thread(target=lambda: (time.sleep(0.8), os._exit(0)), daemon=True).start()
+    return {"ok": True, "path": target}
+
+
+def shlex_quote(s):
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def fetch_whisper_binary(dest_dir):
+    """앱 안에 Whisper 실행 파일이 없을 때(예전 앱) 릴리스에서 받아온다."""
+    url, digest = _asset_url(version.WHISPER_ASSET)
+    os.makedirs(dest_dir, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix="seteuk-wbin-")
+    try:
+        zpath = os.path.join(tmp, "w.zip")
+        _download(url, zpath, digest)
+        with zipfile.ZipFile(zpath) as z:
+            data = z.read("whisper-cli")
+        out = os.path.join(dest_dir, "whisper-cli")
+        with open(out, "wb") as f:
+            f.write(data)
+        os.chmod(out, 0o755)
+        return out
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)

@@ -22,7 +22,7 @@
  단축어/파일 저장 ─iCloud─▶ 세특녹음 폴더 ──┤      학급 지정: 제목·파일명(2-3) → 시간표(녹음 시각) → AI가 본문에서
  드래그&드롭 / 전사문 붙여넣기 ────────────┘
                                               ▼
-                                    ② 전사(STT)  아이폰 전사문 / 메모 텍스트면 생략, 아니면 Gemini
+                                    ② 전사(STT)  아이폰 전사문 / 메모 텍스트면 생략, 아니면 내 맥 Whisper(기본·외부 전송 없음) 또는 Gemini
                                               ▼
                                     ③ 학생별 분리  Gemini(JSON) 또는 이름 기준 규칙(키 없을 때 자동)
                                               ▼   → 교사 확인 화면에서 재지정·수정
@@ -30,7 +30,7 @@
                                               ▼
                                     ⑤ 세특 초안 (학생별/일괄, 바이트·금지어 검사, 줄이기, 버전)
                                               ▼
-                                    ⑥ 구글시트(Apps Script) / 표 복사 / CSV
+                                    ⑥ 구글시트 자동 반영 + 드라이브 일일 백업(Apps Script) / 엑셀 / 표 복사 / CSV
 ```
 
 한 녹음·메모 안에 여러 학생이 섞여 있어도 이름 언급 위치로 나누므로, 학생별 파일·폴더 지정이 필요 없다.
@@ -47,11 +47,14 @@ seteuk-helper/ (GitHub 저장소 = 코드만)
 │  ├─ pipeline.py       작업 큐, 결과 적용, 이름 매칭, 시간표 학급 추정, 규칙 분리
 │  ├─ watcher.py        가져오기: 수신 폴더 / 음성메모 보관함(+tsrp 전사문) / 메모 앱(JXA)
 │  ├─ update.py         GitHub 릴리스 확인·내려받기·검증·설치·재시작
-│  ├─ sheets.py         구글시트·CSV·TSV
+│  ├─ sheets.py         엑셀/구글시트 데이터, 자동 동기화, 드라이브 백업·복원
+│  ├─ xlsx.py           표준 라이브러리 .xlsx 작성기
+│  ├─ whisper.py        내 맥 받아쓰기(whisper.cpp), 모델 내려받기
 │  ├─ version.py        VERSION, UPDATE_REPO
 │  ├─ google_apps_script.gs
 │  └─ static/           index.html, app.js, style.css
-├─ macos/               launcher.sh(앱 실행기), build_app.sh(앱·DMG·zip), icon
+├─ macos/               SeteukApp.swift(네이티브 셸), start_server.sh, bin/whisper-cli, build_app.sh, icon
+├─ tools/build_shortcuts.py  아이폰 단축어 생성·서명 / tools/make_prompt_doc.py  프롬프트_모음.md
 ├─ tools/release.sh     버전업→빌드→태그·푸시→GitHub 릴리스
 ├─ install.sh           curl 한 줄 설치
 └─ 사용설명서.md · README.md · ARCHITECTURE.md
@@ -64,7 +67,10 @@ seteuk-helper/ (GitHub 저장소 = 코드만)
 
 ## 2-1. 설치·업데이트 구조
 
-- **세특도우미.app**: `Contents/MacOS/seteuk`(bash 실행기) + `Resources/app`(번들 코드). `LSUIElement`라 Dock 아이콘 없이 서버만 돌고 브라우저를 연다. 다시 누르면 실행 중인 서버의 화면만 연다.
+- **세특도우미.app** (1.2~): `Contents/MacOS/SeteukHelper`(Swift 네이티브 셸, 유니버설) — 자기 창(WKWebView)·메뉴·Dock.
+  `Resources/start_server.sh`로 파이썬 서버를 자식 프로세스로 띄우고, 비정상 종료 시 재시작, ⌘Q 시 함께 종료.
+  창을 닫아도 앱은 남아 아이폰 기록을 계속 받는다. 예전 버전 서버가 떠 있으면 끄고 새로 띄운다.
+  `Resources/bin/whisper-cli`(whisper.cpp, Metal, 정적 링크) 포함.
 - 실행기는 **번들 코드와 `code/<버전>` 중 가장 높은 버전**을 실행 → 앱 번들을 건드리지 않고 코드만 교체(서명 유지).
 - 앱 내 업데이트: `GET api.github.com/repos/<repo>/releases/latest` → `seteuk-app.zip` 다운로드 → SHA-256(digest) 검증 → 압축 경로 검사 → 버전 일치 확인 → `code/<버전>`에 설치 → DB 백업 후 `execv`로 재시작.
 - 앱 자체(실행기·아이콘 등)가 바뀌면 `install.sh` 재실행 또는 DMG 재설치. 데이터는 별도 위치라 유지.
@@ -116,6 +122,16 @@ API 모드와 수동 모드가 같은 코드를 공유합니다.
 4. **학생 상세** — 관찰기록 타임라인(원본 녹음 재생), 세특 초안 생성·편집·바이트 카운터·버전
 5. **세특 일괄** — 학급별 표, 일괄 생성, 표 복사/CSV/구글시트 전송
 6. **설정** — Gemini 키·모델·연결 테스트, API/수동 모드, 바이트 한도, 문체 예시, **아이폰 기록 가져오기(3가지 경로·권한 안내)**, **시간표**, 구글시트, 백업, **업데이트**
+
+## 6-1. 백업 3중화
+
+| 위치 | 주기 | 내용 | 복원 |
+|---|---|---|---|
+| 이 맥 `data/backups` | 하루 1회(실행 시) + 업데이트·복원 직전 | DB 전체 | 설정 → 백업·복원 |
+| 구글 드라이브 '세특도우미 백업' | 하루 1회(연결 시) | DB zip, 최근 30개 | 설정 → 백업·복원 (앱이 드라이브에서 직접 받아옴) |
+| 구글시트 | 바뀐 내용 5분 내 | 보기용 표(학급별 세특·관찰기록) | 수동 확인용 |
+
+Apps Script 요청은 앱이 자동 생성한 토큰으로 보호(스크립트 복사 시 토큰이 들어감). 오디오 원본은 맥에만 보관.
 
 ## 7. 보안
 

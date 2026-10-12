@@ -2,10 +2,13 @@
 
 수업 중 교사가 말로 남긴 학생 평가·상담 기록을 학생별로 자동 분류해 쌓고, 학기말 **세특(세부능력 및 특기사항) 초안**을 뽑아 주는 macOS 앱.
 
-- 아이폰 **음성메모** 자동 가져오기 (iCloud 동기화) · **메모 앱 받아쓰기** 가져오기 · 단축어/폴더
-- Gemini(사용자 본인 키) 전사·학생별 분리·초안 / 키 없는 **수동 모드** / AI 없는 이름 기준 분리
-- 시간표로 학급 자동 지정, 대시보드, NEIS 바이트 계산, 구글시트 내보내기
-- 표준 라이브러리만 쓰는 Python 3.8+ 로컬 서버 + 바닐라 JS UI (외부 의존성 0)
+- **네이티브 맥 앱**(Swift/WKWebView 셸) — 자기 창·메뉴·Dock, 로그인 시 자동 실행
+- **앱 안에서 받아쓰기**: whisper.cpp(Metal) 내장, 모델은 앱에서 내려받기 → 녹음이 외부로 나가지 않음
+- 아이폰 **음성메모** 자동 가져오기 · **메모 앱 받아쓰기** · 서명된 **단축어**(원탭 녹음 → iCloud 자동 연동)
+- 학생별 분리: 이름 기준 규칙(AI 없음) / Gemini · 세특 초안: Gemini 키 또는 웹 채팅용 **프롬프트 안내**(Gem 지침 포함)
+- **구글시트 자동 반영 + 구글 드라이브 일일 백업/복원**(Apps Script, 토큰 보호), **엑셀(.xlsx) 내보내기**
+- 시간표로 학급 자동 지정, 대시보드, NEIS 바이트 계산
+- 서버는 표준 라이브러리만 쓰는 Python 3.8+ (외부 의존성 0)
 - 학생 데이터는 `~/Library/Application Support/세특도우미/data`에만 저장 — 이 저장소에는 코드만 있음
 
 사용자 안내: [사용설명서.md](사용설명서.md) · 구조: [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -34,6 +37,18 @@ tools/release.sh 1.2.0 "바뀐 점 설명"
 | `SeteukHelper.dmg` | 처음 설치용 (드래그 설치) |
 | `SeteukHelper-mac.zip` | `install.sh` 한 줄 설치용 |
 | `seteuk-app.zip` | **앱 내 자동 업데이트용** (app/ 코드만) |
+| `whisper-cli-arm64.zip` | 예전 앱에 Whisper 실행 파일이 없을 때 받아감 |
+| `세특 녹음.shortcut`, `세특 받아쓰기.shortcut` | 아이폰 단축어 (빌드 시 `shortcuts sign`으로 서명 — 이 맥 iCloud 로그인 필요) |
+
+앱 셸(.app)이 바뀌면 `version.py`의 `SHELL_REQUIRED`를 올립니다. 예전 셸에서 새 코드가 돌면 화면에 '새 앱으로 바꾸기'가 떠서 `SeteukHelper-mac.zip`을 받아 스스로 교체합니다.
+
+### Whisper 실행 파일 다시 빌드
+```bash
+git clone --depth 1 https://github.com/ggml-org/whisper.cpp && cd whisper.cpp
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
+  -DGGML_NATIVE=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+cmake --build build -j --target whisper-cli && cp build/bin/whisper-cli ../seteuk-helper/macos/bin/
+```
 
 사용자 앱은 실행 시 `releases/latest`를 확인 → 배너 표시 → 버튼을 누르면 `seteuk-app.zip`을 받아 SHA-256 검증 후
 `~/Library/Application Support/세특도우미/code/<버전>/`에 풀고 재시작합니다. 앱 번들은 수정하지 않으므로 서명이 깨지지 않으며,

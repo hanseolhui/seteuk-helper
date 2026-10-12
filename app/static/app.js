@@ -79,7 +79,19 @@ function kindBadge(kind) { return `<span class="badge ${kind === '상담' ? 'vio
 // ───────────────────────── AI 실행 (API / 수동) ─────────────────────────
 
 async function runAI(op, params, label, onDone) {
-  const res = await api('/api/ai/run', { op, params, label: label || '' });
+  let res;
+  try { res = await api('/api/ai/run', { op, params, label: label || '' }, { silent: true }); }
+  catch (e) {
+    if (e.message === 'NEED_WHISPER_MODEL') {
+      modal(`<h2>받아쓰기 모델이 필요합니다</h2><p>녹음을 이 맥 안에서 글자로 바꾸려면 Whisper 모델(550MB)을 한 번 내려받아야 합니다. 받는 동안 다른 작업을 계속해도 되고, 끝나면 이 녹음이 자동으로 받아써집니다.</p>
+        <div class="modal-actions"><button id="m-x">나중에</button><button class="primary" id="m-dl">지금 내려받기</button></div>`, box => {
+        $('#m-x', box).onclick = closeModal;
+        $('#m-dl', box).onclick = async () => { await api('/api/whisper/download', { id: 'turbo-q5' }); closeModal(); toast('내려받기를 시작했습니다. 진행 상황은 설정 → 받아쓰기 엔진에서 볼 수 있어요.'); };
+      });
+      return;
+    }
+    toast(e.message, true); return;
+  }
   if (res.manual) return showManual(op, params, res, onDone);
   toast('AI 작업을 시작했습니다. 오른쪽 아래에서 진행 상황을 볼 수 있어요.');
   pollJobs(true);
@@ -179,7 +191,7 @@ async function router(soft) {
   const hash = location.hash.replace(/^#/, '') || '/';
   const parts = hash.split('/').filter(Boolean);
   const nav = { '': 'dashboard', recordings: 'recordings', recording: 'recordings', classes: 'classes', class: 'classes',
-    student: 'classes', drafts: 'drafts', settings: 'settings' }[parts[0] || ''];
+    student: 'classes', drafts: 'drafts', settings: 'settings', prompts: 'prompts' }[parts[0] || ''];
   $$('.sidebar nav a').forEach(a => a.classList.toggle('active', a.dataset.nav === nav));
   const scroll = soft ? window.scrollY : 0;
   try {
@@ -193,6 +205,7 @@ async function router(soft) {
       case 'student': await viewStudent(parts[1]); break;
       case 'drafts': await viewDrafts(parts[1]); break;
       case 'settings': await viewSettings(parts[1]); break;
+      case 'prompts': await viewPrompts(); break;
       default: await viewDashboard();
     }
   } catch (e) {
@@ -224,7 +237,8 @@ async function viewDashboard() {
   const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
   view.innerHTML = `
     <div class="page-head"><div><h1>대시보드</h1><div class="muted">${new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</div></div>
-      <div class="actions"><a class="btn" href="#/recordings">+ 녹음 올리기</a></div></div>
+      <div class="actions"><button id="dash-xlsx">전체 엑셀로 저장</button><a class="btn" href="#/recordings">+ 녹음 올리기</a></div></div>
+    <div id="wh-banner"></div>
     <div class="stats">
       <div class="stat"><div class="label">학생</div><div class="value">${t.students}</div><div class="sub">${t.classes}개 학급</div></div>
       <div class="stat"><div class="label">녹음·기록</div><div class="value">${t.recordings}</div><div class="sub">${t.pending_review ? `<a href="#/recordings">확인 필요 ${t.pending_review}건</a>` : '모두 처리됨'}</div></div>
@@ -267,6 +281,8 @@ async function viewDashboard() {
       </div>
     </div>`;
   bindRowLinks();
+  $('#dash-xlsx').onclick = () => exportXlsx(null);
+  whisperBanner($('#wh-banner'));
 }
 
 function weeklyChart(weeks) {
@@ -310,6 +326,7 @@ async function viewRecordings(classFilter) {
     <div class="page-head"><div><h1>녹음함</h1><div class="muted">수업 평가·상담 녹음을 보관하고, 전사·학생별 분리를 진행합니다.</div></div>
       <div class="actions"><a class="btn" href="#/settings/import">가져오기 설정</a><button class="primary" id="btn-scan">아이폰 기록 지금 가져오기</button></div></div>
     <div id="src-line" class="help" style="margin:-10px 0 14px"></div>
+    <div id="wh-banner"></div>
     <div class="card">
       <div class="tabs"><button class="on" data-tab="audio">녹음 파일 올리기</button><button data-tab="paste">전사문 붙여넣기</button></div>
       <div class="row" style="margin-bottom:12px">
@@ -347,6 +364,7 @@ async function viewRecordings(classFilter) {
     $$('.tabs button').forEach(x => x.classList.toggle('on', x === b));
     $$('[data-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.pane !== b.dataset.tab));
   });
+  whisperBanner($('#wh-banner'));
   $('#rec-filter').onchange = e => { location.hash = '#/recordings' + (e.target.value ? '/' + e.target.value : ''); };
   $('#btn-scan').onclick = async () => {
     $('#btn-scan').disabled = true; $('#btn-scan').textContent = '가져오는 중…';
@@ -430,7 +448,7 @@ async function viewRecording(id) {
         </div>
         <div class="card">
           <div class="section-title"><h2>전사문</h2>
-            <span>${r.has_audio ? `<button class="${r.transcript ? '' : 'primary'}" id="b-trans" ${busy ? 'disabled' : ''}>${r.transcript ? '다시 전사' : 'AI로 전사하기'}</button>` : ''}</span></div>
+            <span>${r.has_audio ? `<button class="${r.transcript ? '' : 'primary'}" id="b-trans" ${busy ? 'disabled' : ''}>${r.transcript ? '다시 받아쓰기' : '받아쓰기 시작'}</button>` : ''}</span></div>
           <textarea id="r-transcript" rows="16" placeholder="${r.has_audio ? 'AI 전사 결과가 여기에 표시됩니다. 다른 앱의 전사문을 직접 붙여넣어도 됩니다.' : '전사문'}">${esc(r.transcript)}</textarea>
           <div class="row" style="margin-top:8px"><span class="muted small">${(r.transcript || '').length.toLocaleString()}자 · 이름 오인식은 여기서 고친 뒤 다시 분리하면 정확해집니다</span>
             <button class="shrink" id="b-save-trans">전사문 저장</button></div>
@@ -670,7 +688,7 @@ async function viewStudent(id) {
         <button id="st-edit">학생 정보</button></div></div>
     <div class="split">
       <div class="card">
-        <div class="section-title"><h2>관찰기록 ${d.notes.length}건</h2><button class="sm" id="n-add">+ 직접 추가</button></div>
+        <div class="section-title"><h2>관찰기록 ${d.notes.length}건</h2><span><button class="sm" id="n-copy" title="Gemini·ChatGPT에 붙여넣을 수 있게 복사">관찰기록 복사</button> <button class="sm" id="n-add">+ 직접 추가</button></span></div>
         ${d.notes.length ? '' : '<p class="muted">아직 기록이 없습니다. 녹음을 올리거나 직접 추가하세요.</p>'}
         ${d.notes.map(n => `<div class="note ${n.use_in_draft ? '' : 'off'}" data-note="${n.id}">
           <div class="meta">${esc(n.date || '')} ${kindBadge(n.kind)} <span class="badge">${esc(n.category || '기타')}</span>
@@ -713,6 +731,7 @@ async function viewStudent(id) {
   text.addEventListener('input', update); update();
   $('#st-edit').onclick = () => editStudentModal(s, reload);
   $('#n-add').onclick = () => editNoteModal(null, reload, s.id);
+  $('#n-copy').onclick = async () => { const t = await api(`/api/students/${s.id}/notes_text`); copyText(t.text); };
   $$('[data-note]').forEach(el => {
     const n = d.notes.find(x => x.id === +el.dataset.note);
     $('.n-edit', el).onclick = () => editNoteModal(n, reload);
@@ -774,8 +793,9 @@ async function viewDrafts(classId) {
           <button id="g-missing" ${isApi && missing ? '' : 'disabled'} title="${isApi ? '' : 'API 모드에서만 일괄 생성할 수 있습니다'}">초안 없는 학생 생성 (${missing})</button>
           <button id="g-all" ${isApi && withNotes ? '' : 'disabled'}>기록 있는 학생 전체 생성 (${withNotes})</button>
           <button id="x-copy">표 복사</button>
-          <a class="btn" href="/export/csv?class_id=${c.id}">CSV 저장</a>
-          <button class="primary" id="x-sheet">구글시트로 보내기</button></span></div>
+          <button id="x-csv">CSV</button>
+          <button id="x-xlsx">엑셀로 저장</button>
+          <button class="primary" id="x-sheet">구글시트 지금 반영</button></span></div>
       ${isApi ? '' : '<p class="help">수동 모드에서는 학생 이름을 눌러 한 명씩 초안을 만드세요.</p>'}
       <div class="table-wrap" style="margin-top:8px"><table>
         <thead><tr><th style="width:50px">번호</th><th style="width:90px">이름</th><th class="right" style="width:60px">기록</th><th>세특 초안</th><th class="right" style="width:90px">바이트</th><th style="width:70px">상태</th></tr></thead>
@@ -786,7 +806,7 @@ async function viewDrafts(classId) {
           <td class="num ${s.draft_bytes > limit ? 'counter over' : ''}">${s.draft_bytes ? s.draft_bytes.toLocaleString() : ''}</td>
           <td>${s.draft_status ? `<span class="badge ${s.draft_status === '확정' ? 'green' : 'blue'}">${s.draft_status}</span>` : ''}</td></tr>`).join('')}
         </tbody></table></div>
-      <p class="help">'표 복사' 후 구글시트나 엑셀 빈 칸에 붙여넣으면 번호·이름·기록수·초안·바이트·상태가 들어갑니다. 확정본이 있으면 확정본을, 없으면 최신 초안을 내보냅니다.</p>
+      <p class="help">구글시트를 연결해 두면 자동으로 반영됩니다. '표 복사' 후 시트나 엑셀 빈 칸에 붙여넣으면 번호·이름·기록수·초안·바이트·상태가 들어갑니다. 확정본이 있으면 확정본을, 없으면 최신 초안을 내보냅니다.</p>
     </div>`;
   bindRowLinks();
   $('#dc').onchange = e => { location.hash = '#/drafts/' + e.target.value; };
@@ -799,10 +819,12 @@ async function viewDrafts(classId) {
   $('#g-missing').onclick = () => batch(true);
   $('#g-all').onclick = () => batch(false);
   $('#x-copy').onclick = async () => { const t = await api('/api/export/table?class_id=' + c.id); copyText(t.tsv); };
+  $('#x-xlsx').onclick = () => exportXlsx(c.id);
+  $('#x-csv').onclick = async () => { const r = await api('/api/export/csv', { class_id: c.id }); toast(`다운로드 폴더에 저장했습니다: ${r.name}`); };
   $('#x-sheet').onclick = async () => {
-    if (!settings.sheets_url) { toast('설정에서 구글시트 연결을 먼저 해주세요', true); location.hash = '#/settings'; return; }
-    const r = await api('/api/export/sheets', { class_id: c.id });
-    toast(`구글시트 '${r.sheet}' 시트에 ${r.count}명을 보냈습니다`);
+    if (!settings.sheets_url) { toast('설정에서 구글시트 연결을 먼저 해주세요', true); location.hash = '#/settings/google'; return; }
+    const r = await api('/api/export/sheets', {});
+    toast(`구글시트에 반영했습니다 (시트 ${r.sheets}개)`);
   };
 }
 
@@ -857,20 +879,46 @@ async function viewSettings(section) {
           <div id="tt-box" style="overflow:auto"></div>
         </div>
       </div>
-      <div class="card">
-        <h2>구글시트 연결</h2>
-        <div class="info-box"><ol>
-          <li>새 구글시트 열기 → <b>확장 프로그램 › Apps Script</b></li>
-          <li>프로그램 폴더의 <b>google_apps_script.gs</b> 내용을 통째로 붙여넣고 저장 <button class="sm" id="copy-gs">스크립트 복사</button></li>
-          <li><b>배포 › 새 배포 › 유형: 웹 앱</b>, 실행: <b>나</b>, 액세스: <b>모든 사용자</b> → 배포 → 권한 허용</li>
-          <li>나온 <b>웹 앱 URL</b>(…/exec)을 아래에 붙여넣기</li></ol></div>
-        <label class="field" style="margin-top:12px"><span>웹 앱 URL</span><input id="sheets_url" value="${esc(s.sheets_url)}" placeholder="https://script.google.com/macros/s/…/exec"></label>
-        <label class="field" style="margin-top:8px"><span>보안 토큰 (스크립트의 TOKEN과 같게, 선택)</span><input id="sheets_token" value="${esc(s.sheets_token)}"></label>
+      <div class="card" style="grid-column:1 / -1" id="stt">
+        <div class="section-title"><h2>받아쓰기(음성 → 글자) 엔진</h2><span id="stt-active" class="small"></span></div>
+        <div class="row" style="gap:18px;align-items:center">
+          <label class="check shrink"><input type="radio" name="stt_engine" value="whisper" ${s.stt_engine !== 'gemini' ? 'checked' : ''}> <b>내 맥에서 (Whisper)</b> — 권장 · 녹음이 외부로 나가지 않음 · 무료</label>
+          <label class="check shrink"><input type="radio" name="stt_engine" value="gemini" ${s.stt_engine === 'gemini' ? 'checked' : ''}> Gemini — 녹음을 구글로 보내서 받아쓰기</label>
+        </div>
+        <p class="help"><b>Whisper</b>는 오픈AI가 공개한 음성 인식 모델을 이 맥에서 직접 돌립니다. 인터넷·API 키·비용이 없고 <b>녹음이 맥 밖으로 나가지 않아</b> 학생 개인정보에 가장 안전합니다. 처음 한 번 모델을 내려받으세요.</p>
+        <div id="wh-box" style="margin-top:10px"><p class="muted">확인 중…</p></div>
       </div>
-      <div class="card">
-        <h2>백업</h2>
-        <p class="muted small">프로그램을 켤 때마다 하루 한 번 자동 백업(최근 30개 보관)됩니다. 녹음 원본은 data/audio에 날짜별로 보관됩니다.<br>다른 맥으로 옮길 때는 <b>세특도우미 폴더 전체</b>를 복사하면 됩니다.</p>
-        <button id="backup">지금 백업하기</button>
+      <div class="card" style="grid-column:1 / -1" id="google">
+        <div class="section-title"><h2>구글시트 자동 반영 · 구글 드라이브 백업</h2><span id="g-status" class="small"></span></div>
+        <p class="help" style="margin-top:-4px">한 번 연결해 두면 <b>기록이 바뀔 때마다 5분 안에 구글시트에 자동 반영</b>되고, <b>하루 한 번 전체 기록이 구글 드라이브에 백업</b>됩니다. 직접 파일을 올리거나 덮어쓸 일이 없습니다. (시트는 보기용 사본 — 수정은 세특도우미에서)</p>
+        <div class="split">
+          <div class="info-box"><b>연결 방법 (5분, 한 번만)</b><ol>
+            <li><a href="https://sheets.new" target="_blank">sheets.new</a> 로 새 구글시트 만들기 (이름 예: 세특도우미)</li>
+            <li>시트 메뉴 <b>확장 프로그램 › Apps Script</b> → 원래 있던 내용 지우기</li>
+            <li><button class="sm primary" id="copy-gs">스크립트 복사</button> → 붙여넣기 → 저장(⌘S)</li>
+            <li><b>배포 › 새 배포</b> → 톱니바퀴 <b>웹 앱</b> → 실행: <b>나</b> · 액세스: <b>모든 사용자</b> → 배포</li>
+            <li>권한 검토 → 내 계정 → (경고가 뜨면 <b>고급 → 이동</b>) → <b>허용</b></li>
+            <li>나온 <b>웹 앱 URL</b>을 오른쪽에 붙여넣고 <b>연결 확인</b></li></ol>
+            <p class="small muted" style="margin:6px 0 0">'스크립트 복사'에는 이 맥 전용 보안 토큰이 들어 있어서, 주소를 알아도 다른 사람은 기록에 접근할 수 없습니다.</p></div>
+          <div>
+            <label class="field"><span>웹 앱 URL</span><input id="sheets_url" value="${esc(s.sheets_url)}" placeholder="https://script.google.com/macros/s/…/exec"></label>
+            <div class="row" style="margin-top:8px"><button class="shrink" id="g-test">연결 확인</button><span id="g-test-r" class="small"></span></div>
+            <label class="check" style="margin-top:12px"><input type="checkbox" id="sheets_auto" ${s.sheets_auto === '1' ? 'checked' : ''}> 구글시트에 자동 반영 (바뀐 내용이 있을 때 5분마다)</label><br>
+            <label class="check" style="margin-top:6px"><input type="checkbox" id="drive_backup" ${s.drive_backup === '1' ? 'checked' : ''}> 하루 한 번 구글 드라이브에 전체 백업 (최근 30개 보관)</label>
+            <div class="row" style="margin-top:12px"><button class="shrink" id="g-sync">지금 시트에 반영</button><button class="shrink" id="g-backup">지금 드라이브 백업</button></div>
+            <p class="help" id="g-last"></p>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="grid-column:1 / -1" id="backup-card">
+        <div class="section-title"><h2>백업 · 복원 · 엑셀</h2>
+          <span style="display:flex;gap:6px;flex-wrap:wrap"><button id="backup">지금 백업 (이 맥)</button><button id="xlsx-all" class="primary">전체 엑셀로 저장</button></span></div>
+        <p class="help" style="margin-top:-4px">이 맥에는 매일 자동 백업(30일)됩니다. 구글 드라이브 백업까지 켜 두면 맥이 고장 나도 복원할 수 있습니다. 녹음 원본(오디오)은 용량 때문에 이 맥에만 보관되니, 타임머신 백업을 함께 쓰면 가장 안전합니다.</p>
+        <div class="split" style="margin-top:8px">
+          <div><h3>복원할 백업 고르기</h3><div id="bk-list" class="small"><p class="muted">불러오는 중…</p></div></div>
+          <div><h3>파일로 복원</h3><p class="help">받아 둔 백업 파일(.zip 또는 .db)을 고르세요. 복원 전에 지금 상태를 자동 백업합니다.</p>
+            <input type="file" id="restore-file" accept=".zip,.db"></div>
+        </div>
       </div>
       <div class="card">
         <h2>프로그램 업데이트</h2>
@@ -889,7 +937,9 @@ async function viewSettings(section) {
     byte_limit: $('#byte_limit').value, school_level: $('#school_level').value, teacher_subject: $('#teacher_subject').value,
     draft_guidance: $('#draft_guidance').value, style_examples: $('#style_examples').value,
     auto_process: $('#auto_process').checked ? '1' : '0',
-    sheets_url: $('#sheets_url').value.trim(), sheets_token: $('#sheets_token').value.trim(),
+    sheets_url: $('#sheets_url').value.trim(),
+    sheets_auto: $('#sheets_auto').checked ? '1' : '0', drive_backup: $('#drive_backup').checked ? '1' : '0',
+    stt_engine: ($('input[name=stt_engine]:checked') || {}).value || 'whisper',
     period_times: $('#period_times').value, timetable: JSON.stringify(timetable),
     update_check: $('#update_check').checked ? '1' : '0',
   });
@@ -909,7 +959,24 @@ async function viewSettings(section) {
     await api('/api/settings', { clear_key: true }); router(true); updateModeBadge();
   };
   $('#copy-gs').onclick = async () => { const t = await (await fetch('/google_apps_script.gs')).text(); copyText(t); };
-  $('#backup').onclick = async () => { const r = await api('/api/backup', {}); toast('백업했습니다'); };
+  $('#backup').onclick = async () => { await api('/api/backup', {}); toast('백업했습니다'); renderBackups(); };
+  $('#xlsx-all').onclick = () => exportXlsx(null);
+  $$('input[name=stt_engine]').forEach(r => r.onchange = async () => { await api('/api/settings', { stt_engine: r.value }); renderWhisper(); });
+  $('#g-test').onclick = async () => {
+    await api('/api/settings', { sheets_url: $('#sheets_url').value.trim() });
+    $('#g-test-r').textContent = '확인 중…';
+    try { const r = await api('/api/sheets/test', {}, { silent: true }); $('#g-test-r').innerHTML = `<span class="ok-text">✓ 연결됨</span> <a href="${esc(r.url)}" target="_blank">시트 열기</a>`; }
+    catch (e) { $('#g-test-r').innerHTML = `<span class="bad-text">${esc(e.message)}</span>`; }
+  };
+  $('#g-sync').onclick = async () => { await save(); const r = await api('/api/export/sheets', {}); toast(`구글시트에 ${r.sheets}개 시트를 반영했습니다`); renderGoogle(); };
+  $('#g-backup').onclick = async () => { await save(); $('#g-backup').disabled = true; try { const r = await api('/api/drive/backup', {}); toast(`드라이브에 백업했습니다 (${Math.round(r.size / 1024)}KB)`); } finally { $('#g-backup').disabled = false; renderGoogle(); renderBackups(); } };
+  $('#restore-file').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    if (!confirmBox(`'${f.name}' 백업으로 지금 기록을 바꿀까요?\n(지금 상태는 자동으로 따로 백업됩니다)`)) { e.target.value = ''; return; }
+    const r = await api('/api/restore/upload', f);
+    toast(`복원했습니다 — 학급 ${r.counts.classes}, 학생 ${r.counts.students}, 기록 ${r.counts.notes}`); router(true);
+  };
+  renderWhisper(); renderGoogle(); renderBackups();
 
   // 시간표
   let timetable = {};
@@ -931,7 +998,7 @@ async function viewSettings(section) {
   $('#period_times').addEventListener('change', drawTT);
 
   // 가져오기 경로
-  renderSources().then(() => { if (section === 'import') $('#import').scrollIntoView({ behavior: 'smooth' }); });
+  renderSources().then(() => { if (section && $('#' + section)) $('#' + section).scrollIntoView({ behavior: 'smooth' }); });
 
   // 업데이트
   const showUpd = async force => {
@@ -948,6 +1015,87 @@ async function viewSettings(section) {
   };
   showUpd(false);
   $('#upd-check').onclick = () => showUpd(true);
+}
+
+async function renderGoogle() {
+  if (!$('#g-last')) return;
+  const s = await api('/api/settings', undefined, { silent: true }).catch(() => null);
+  if (!s) return;
+  const parts = [];
+  parts.push(s.sheets_last_sync ? `시트 마지막 반영: ${esc(s.sheets_last_sync)}` : '시트 반영 기록 없음');
+  parts.push(s.drive_last_backup ? `드라이브 마지막 백업: ${esc(s.drive_last_backup)}` : '드라이브 백업 기록 없음');
+  $('#g-last').innerHTML = parts.join(' · ') + (s.sheets_last_error ? `<br><span class="bad-text">최근 오류: ${esc(s.sheets_last_error)}</span>` : '');
+  $('#g-status').innerHTML = s.sheets_url ? (s.sheets_last_error ? '<span class="badge red">오류</span>' : '<span class="badge green">연결됨</span>') : '<span class="badge">연결 안 됨</span>';
+}
+
+async function renderBackups() {
+  const box = $('#bk-list'); if (!box) return;
+  const d = await api('/api/backups', undefined, { silent: true }).catch(e => ({ local: [], drive: [], drive_error: e.message }));
+  const kb = n => n > 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.round(n / 1024) + 'KB';
+  const row = (kind, id, name, time, size) => `<tr><td>${kind === 'drive' ? '<span class="badge blue">드라이브</span>' : '<span class="badge">이 맥</span>'}</td>
+    <td>${esc(time)}</td><td class="muted">${esc(name)}</td><td class="num">${kb(size)}</td><td class="right"><button class="sm bk-go" data-kind="${kind}" data-id="${esc(id)}" data-name="${esc(name)}">복원</button></td></tr>`;
+  const rows = d.drive.slice(0, 10).map(f => row('drive', f.id, f.name, (f.time || '').replace('T', ' ').slice(0, 16), f.size))
+    .concat(d.local.slice(0, 10).map(f => row('local', f.name, f.name, f.time, f.size)));
+  box.innerHTML = (rows.length ? `<div class="table-wrap" style="max-height:260px"><table><tbody>${rows.join('')}</tbody></table></div>` : '<p class="muted">아직 백업이 없습니다.</p>')
+    + (d.drive_error ? `<p class="bad-text small">드라이브 목록을 못 불러옴: ${esc(d.drive_error)}</p>` : '');
+  $$('.bk-go', box).forEach(b => b.onclick = async () => {
+    if (!confirmBox(`'${b.dataset.name}' 백업으로 지금 기록을 바꿀까요?\n(지금 상태는 자동으로 따로 백업됩니다)`)) return;
+    b.disabled = true; b.textContent = '복원 중…';
+    const r = await api('/api/restore', { kind: b.dataset.kind, id: b.dataset.id, name: b.dataset.name });
+    toast(`복원했습니다 — 학급 ${r.counts.classes}, 학생 ${r.counts.students}, 기록 ${r.counts.notes}`); router(true);
+  });
+}
+
+let whTimer;
+async function renderWhisper() {
+  const box = $('#wh-box'); if (!box) return;
+  clearTimeout(whTimer);
+  const w = await api('/api/whisper', undefined, { silent: true }).catch(() => null);
+  if (!w) return;
+  const hasModel = w.models.some(m => m.installed);
+  $('#stt-active').innerHTML = w.engine === 'gemini' || !w.supported ? '<span class="badge amber">지금: Gemini로 받아쓰기 (외부 전송)</span>'
+    : hasModel ? '<span class="badge green">지금: 내 맥 안에서 받아쓰기 — 외부 전송 없음</span>' : '<span class="badge red">모델을 내려받아야 받아쓰기가 됩니다</span>';
+  if (!w.supported) { box.innerHTML = '<div class="warn">이 맥은 Intel 칩이라 Whisper를 쓸 수 없습니다. Gemini 받아쓰기를 사용하세요.</div>'; return; }
+  if (!w.binary) { box.innerHTML = '<div class="warn">Whisper 실행 파일이 없습니다. 세특도우미를 최신 설치 파일로 다시 설치하세요.</div>'; return; }
+  let downloading = false;
+  box.innerHTML = '<div class="table-wrap"><table><tbody>' + w.models.map(m => {
+    const dl = m.download && m.download.status === 'downloading' ? m.download : null;
+    if (dl) downloading = true;
+    const pct = dl ? Math.floor(dl.done / dl.total * 100) : 0;
+    let action;
+    if (m.installed) action = `<span class="badge green">설치됨</span> <button class="sm wh-del" data-id="${m.id}">삭제</button>`;
+    else if (dl) action = `<div class="bar" style="width:160px;display:inline-flex"><div class="b1" style="width:${pct}%"></div></div> ${pct}% <button class="sm wh-cancel" data-id="${m.id}">취소</button>`;
+    else action = `<button class="sm ${m.id === 'turbo-q5' ? 'primary' : ''} wh-dl" data-id="${m.id}">내려받기</button>`;
+    const err = m.download && m.download.status === 'error' ? `<div class="bad-text small">${esc(m.download.error)}</div>` : '';
+    return `<tr><td style="width:110px"><b>${esc(m.label)}</b></td><td class="small">${esc(m.desc)}${err}</td><td class="right nowrap">${action}</td></tr>`;
+  }).join('') + '</tbody></table></div><p class="help">모델은 한 개만 있으면 됩니다. 와이파이에서 내려받으세요.</p>';
+  $$('.wh-dl', box).forEach(b => b.onclick = async () => { await api('/api/whisper/download', { id: b.dataset.id }); renderWhisper(); });
+  $$('.wh-cancel', box).forEach(b => b.onclick = async () => { await api('/api/whisper/cancel', { id: b.dataset.id }); setTimeout(renderWhisper, 500); });
+  $$('.wh-del', box).forEach(b => b.onclick = async () => { if (confirmBox('이 모델을 삭제할까요?')) { await api('/api/whisper/delete', { id: b.dataset.id }); renderWhisper(); } });
+  if (downloading) whTimer = setTimeout(renderWhisper, 1500);
+}
+
+async function whisperBanner(el) {
+  if (!el) return;
+  const w = await api('/api/whisper', undefined, { silent: true }).catch(() => null);
+  if (!w || !w.supported || !w.binary || w.engine === 'gemini' || w.models.some(m => m.installed)) { el.innerHTML = ''; return; }
+  const m = w.models.find(x => x.id === 'turbo-q5');
+  const dl = m.download && m.download.status === 'downloading' ? m.download : null;
+  const pct = dl ? Math.floor(dl.done / dl.total * 100) : 0;
+  el.innerHTML = `<div class="card" style="border-color:var(--accent);margin-bottom:16px">
+    <div class="section-title"><h2>🎙 받아쓰기 모델 설치 (처음 한 번)</h2>
+      ${dl ? `<span class="small"><div class="bar" style="width:200px;display:inline-flex"><div class="b1" style="width:${pct}%"></div></div> ${pct}% 내려받는 중</span>`
+           : `<button class="primary" id="wb-go">지금 내려받기 (550MB)</button>`}</div>
+    <p class="muted small" style="margin:0">녹음을 <b>이 맥 안에서</b> 글자로 바꾸는 Whisper 모델입니다. 인터넷·API 키·비용 없이 동작하고 녹음이 외부로 나가지 않습니다.
+    ${m.download && m.download.status === 'error' ? `<br><span class="bad-text">${esc(m.download.error)}</span>` : ''} 설치가 끝나면 기다리던 녹음이 자동으로 받아써집니다.</p></div>`;
+  if ($('#wb-go', el)) $('#wb-go', el).onclick = async () => { await api('/api/whisper/download', { id: 'turbo-q5' }); whisperBanner(el); };
+  if (dl) setTimeout(() => { if (document.body.contains(el)) whisperBanner(el); }, 1500);
+}
+
+async function exportXlsx(classId) {
+  toast('엑셀 파일을 만드는 중…');
+  const r = await api('/api/export/xlsx', { class_id: classId });
+  toast(`다운로드 폴더에 저장했습니다: ${r.name}`);
 }
 
 async function renderSources() {
@@ -1038,6 +1186,17 @@ async function checkUpdateBanner() {
     $('#ver-badge').textContent = 'v' + v.version;
     const u = await api('/api/update/check', undefined, { silent: true });
     const b = $('#update-banner');
+    if (v.shell_outdated && !u.available) {
+      b.innerHTML = `<b>세특도우미가 '앱 창' 버전으로 바뀌었습니다.</b> 브라우저 대신 자기 창으로 열리고, 녹음을 이 맥 안에서 받아쓰는 기능이 들어 있습니다. 기록은 그대로 유지됩니다.
+        <button class="sm primary" id="ub-app">새 앱으로 바꾸기</button> <button class="sm ghost" id="ub-x">나중에</button>`;
+      b.classList.remove('hidden');
+      $('#ub-x').onclick = () => b.classList.add('hidden');
+      $('#ub-app').onclick = async () => {
+        modal('<h2>새 앱 설치 중…</h2><p>잠시 후 세특도우미가 새 창으로 다시 열립니다. 이 브라우저 창은 닫아도 됩니다.</p>');
+        try { await api('/api/update/install_app', {}); } catch (e) { closeModal(); }
+      };
+      return;
+    }
     if (u.available) {
       b.innerHTML = `<b>새 버전 ${esc(u.latest)}이(가) 나왔습니다.</b> <button class="sm primary" id="ub-go">지금 업데이트</button> <button class="sm ghost" id="ub-x">나중에</button>
         ${u.notes ? `<div class="notes">${esc(u.notes)}</div>` : ''}`;
@@ -1046,6 +1205,24 @@ async function checkUpdateBanner() {
       $('#ub-x').onclick = () => b.classList.add('hidden');
     }
   } catch (e) { /* 오프라인 */ }
+}
+
+async function viewPrompts() {
+  const d = await api('/api/prompts');
+  view.innerHTML = `
+    <div class="page-head"><div><h1>프롬프트 안내</h1><div class="muted">Gemini·ChatGPT 웹 화면에서 직접 쓸 때 복사해서 붙여넣는 문구입니다. API 키가 없어도 쓸 수 있습니다.</div></div></div>
+    <div class="info-box" style="margin-bottom:16px"><b>가장 쉬운 방법</b>
+      <ol><li>아래 <b>①</b>로 Gemini 'Gem'(또는 ChatGPT 'GPT')을 한 번만 만들어 둡니다.</li>
+        <li>학생 화면에서 <b>관찰기록 복사</b> → Gem에 "세특 써줘"와 함께 붙여넣기 → 결과를 학생 화면 편집창에 붙여넣기.</li>
+        <li>세특도우미를 <b>수동 모드</b>로 두면, 녹음·학생 화면의 AI 버튼을 누를 때 명단·기록이 이미 채워진 프롬프트가 자동으로 나옵니다.</li></ol>
+      <p class="small muted" style="margin:6px 0 0">아래 문구의 <b>[대괄호]</b> 부분만 실제 내용으로 바꾸면 됩니다. 설정의 바이트 한도·추가 지침이 반영되어 있습니다.</p></div>
+    ${d.templates.map((t, i) => `<div class="card">
+      <div class="section-title"><h2>${esc(t.title)}</h2><button class="primary sm p-copy" data-i="${i}">프롬프트 복사</button></div>
+      <p class="muted small" style="margin-top:-4px">${esc(t.when)}</p>
+      <ol class="small">${t.steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol>
+      <details><summary class="small">프롬프트 내용 보기</summary><textarea class="prompt-box" readonly style="max-height:340px;margin-top:8px">${esc(t.prompt)}</textarea></details>
+    </div>`).join('')}`;
+  $$('.p-copy').forEach(b => b.onclick = () => copyText(d.templates[+b.dataset.i].prompt));
 }
 
 async function updateModeBadge() {
@@ -1078,6 +1255,10 @@ document.addEventListener('focusout', () => {
     }, 200);
   }
 });
+
+if (navigator.userAgent.includes('SeteukApp')) document.documentElement.classList.add('native');
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => e.preventDefault());
 
 updateModeBadge();
 checkUpdateBanner();

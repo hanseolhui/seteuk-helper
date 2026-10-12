@@ -10,10 +10,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 if [ -n "$(git status --porcelain)" ]; then echo "커밋하지 않은 변경이 있습니다. 먼저 커밋하세요."; git status --short; exit 1; fi
 sed -i '' "s/^VERSION = .*/VERSION = \"$V\"/" app/version.py
 ./macos/build_app.sh
-git add app/version.py
+git add app/version.py 프롬프트_모음.md
 git commit -m "Release v$V"
 git tag "v$V"
 git push origin HEAD --tags
 if [ -n "$NOTES" ]; then N=(--notes "$NOTES"); else N=(--generate-notes); fi
-gh release create "v$V" dist/SeteukHelper.dmg dist/SeteukHelper-mac.zip dist/seteuk-app.zip --title "세특도우미 $V" "${N[@]}"
+ASSETS=(dist/SeteukHelper.dmg dist/SeteukHelper-mac.zip dist/seteuk-app.zip dist/whisper-cli-arm64.zip)
+for f in "dist/세특 녹음.shortcut" "dist/세특 받아쓰기.shortcut"; do [ -f "$f" ] && ASSETS+=("$f"); done
+gh release create "v$V" "${ASSETS[@]}" --title "세특도우미 $V" "${N[@]}"
 echo "배포 완료: v$V"

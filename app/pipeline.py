@@ -110,7 +110,7 @@ def apply_transcript(rid, text, chain=False):
     _set_rec(conn, rid, transcript=text, status="전사완료", error="")
     conn.close()
     if chain:
-        enqueue("segment", {"recording_id": rid}, "학생별 분리 #%d" % rid)
+        segment_after_transcript(rid)
     return {"ok": True}
 
 
@@ -272,12 +272,51 @@ def auto_process(rid, force=False):
     if not r or (not force and settings.get("auto_process") != "1"):
         return
     has_text = bool((r["transcript"] or "").strip())
-    if settings.get("mode") == "api" and settings.get("gemini_api_key"):
-        if has_text:
-            enqueue("segment", {"recording_id": rid}, "학생별 분리 #%d" % rid)
-        elif r["audio_path"]:
+    if not has_text and r["audio_path"]:
+        if use_whisper(settings):
+            import whisper
+            if whisper.available():
+                enqueue("transcribe", {"recording_id": rid, "chain": True}, "내 맥에서 받아쓰기 #%d" % rid)
+            else:
+                conn = db.connect()
+                _set_rec(conn, rid, status="보관됨", error="받아쓰기 모델을 내려받으면 자동으로 글자로 바뀝니다 (설정 → 받아쓰기 엔진)")
+                conn.close()
+        elif ai_ready(settings):
             enqueue("transcribe", {"recording_id": rid, "chain": True}, "전사 #%d" % rid)
     elif has_text:
+        segment_after_transcript(rid, settings)
+
+
+def process_pending():
+    """받아쓰기 모델 설치 직후: 글자로 안 바뀐 채 기다리던 녹음을 모두 처리."""
+    conn = db.connect()
+    ids = [r["id"] for r in db.rows(conn, "SELECT id FROM recordings WHERE audio_path IS NOT NULL "
+                                          "AND (transcript IS NULL OR transcript='') AND status IN ('보관됨','오류')")]
+    conn.close()
+    for rid in ids:
+        auto_process(rid, force=True)
+    return len(ids)
+
+
+def ai_ready(settings):
+    return settings.get("mode") == "api" and bool(settings.get("gemini_api_key"))
+
+
+def use_whisper(settings):
+    """받아쓰기 엔진: 기본은 내 맥(Whisper). 설정에서 Gemini를 고른 경우와 Intel 맥만 Gemini."""
+    import whisper
+    engine = settings.get("stt_engine") or "whisper"
+    if engine == "gemini" or not whisper.supported():  # Intel 맥은 Whisper 불가 → Gemini
+        return False
+    return True  # 기본: 녹음이 맥 밖으로 나가지 않는 내 맥 받아쓰기
+
+
+def segment_after_transcript(rid, settings=None):
+    """전사문이 생긴 뒤: Gemini 키가 있으면 AI 분리, 없으면 이름 기준 규칙 분리."""
+    settings = settings or db.get_settings()
+    if ai_ready(settings):
+        enqueue("segment", {"recording_id": rid}, "학생별 분리 #%d" % rid)
+    else:
         try:
             rule_segment(rid)
         except ValueError:
@@ -381,8 +420,39 @@ def enqueue(op, params, label=""):
     return jid
 
 
-def _run_api(op, params):
+def _set_job_msg(job_id, msg):
+    if not job_id:
+        return
+    conn = db.connect()
+    conn.execute("UPDATE jobs SET message=? WHERE id=?", (msg, job_id))
+    conn.commit()
+    conn.close()
+
+
+def _run_whisper(params, job_id=None):
+    import whisper
+    rid = params["recording_id"]
+    conn = db.connect()
+    r = _recording(conn, rid)
+    students = _students(conn, r["class_id"])
+    _set_rec(conn, rid, status="전사중", error="")
+    conn.close()
+    if not r["audio_path"] or not os.path.exists(r["audio_path"]):
+        raise ValueError("녹음 파일이 없습니다.")
+    last = [-1]
+
+    def progress(p):
+        if p >= last[0] + 5:
+            last[0] = p
+            _set_job_msg(job_id, "내 맥에서 받아쓰는 중 %d%%" % p)
+    text = whisper.transcribe(r["audio_path"], students, r["kind"], on_progress=progress)
+    return apply_transcript(rid, text, params.get("chain"))
+
+
+def _run_api(op, params, job_id=None):
     settings = db.get_settings()
+    if op == "transcribe" and use_whisper(settings):
+        return _run_whisper(params, job_id)
     key = (settings.get("gemini_api_key") or "").strip()
     if not key:
         raise ValueError("Gemini API 키가 없습니다. 설정에서 입력하거나 '수동 모드'를 사용하세요.")
@@ -441,7 +511,7 @@ def _worker():
             params = json.loads(job["params"] or "{}")
             status, msg = "완료", ""
             try:
-                res = _run_api(job["op"], params)
+                res = _run_api(job["op"], params, job["id"])
                 if isinstance(res, dict) and "matched" in res:
                     msg = "배정 %d건, 미배정 %d건" % (res["matched"], res["unmatched"])
             except Exception as e:  # noqa

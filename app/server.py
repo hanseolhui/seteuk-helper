@@ -24,6 +24,7 @@ import sheets  # noqa: E402
 import update  # noqa: E402
 import version  # noqa: E402
 import watcher  # noqa: E402
+import whisper  # noqa: E402
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("SETEUK_PORT", "8765"))
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -499,6 +500,11 @@ def unmatched_delete(h, q, b):
 def ai_run(h, q, b):
     op, params = b["op"], b.get("params", {})
     settings = db.get_settings()
+    if op == "transcribe" and not b.get("manual") and pipeline.use_whisper(settings):
+        if not whisper.available():
+            raise ApiError("NEED_WHISPER_MODEL")
+        jid = pipeline.enqueue(op, params, "내 맥에서 받아쓰기 %s" % b.get("label", ""))
+        return {"ok": True, "job_id": jid}
     if settings.get("mode") == "manual" or b.get("manual"):
         p = pipeline.build_prompt(op, params)
         return {"manual": True, "prompt": p["prompt"], "has_audio": bool(p.get("audio_path"))}
@@ -680,14 +686,133 @@ def export_table(h, q, b):
             "tsv": sheets.to_tsv(sheets.HEADER[:6], [r[:6] for r in rows])}
 
 
-@route("POST", "/api/export/sheets")
-def export_sheets(h, q, b):
+@route("POST", "/api/export/xlsx")
+def export_xlsx(h, q, b):
+    path = sheets.export_xlsx(_int(b.get("class_id")))
+    open_in_finder(path, reveal=True)
+    return {"ok": True, "path": path, "name": os.path.basename(path)}
+
+
+@route("POST", "/api/export/csv")
+def export_csv(h, q, b):
     conn = db.connect()
     label, rows = sheets.class_table(conn, int(b["class_id"]))
-    settings = db.get_settings(conn)
     conn.close()
-    res = sheets.send_to_sheets(settings.get("sheets_url"), settings.get("sheets_token"), label, sheets.HEADER, rows)
-    return {"ok": True, "count": res.get("count", len(rows)), "sheet": label}
+    path = os.path.join(os.path.expanduser("~/Downloads"), "세특_%s_%s.csv" % (label, datetime.date.today().isoformat()))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(sheets.to_csv(sheets.HEADER, rows))
+    open_in_finder(path, reveal=True)
+    return {"ok": True, "path": path, "name": os.path.basename(path)}
+
+
+# ───────────────────────── 구글시트·드라이브 / 백업·복원 ─────────────────────────
+
+def ensure_token():
+    s = db.get_settings()
+    if not s.get("sheets_token"):
+        import secrets
+        db.set_settings({"sheets_token": secrets.token_urlsafe(18)})
+        s = db.get_settings()
+    return s["sheets_token"]
+
+
+@route("POST", "/api/export/sheets")
+def export_sheets(h, q, b):
+    return sheets.sync_now(force=True)
+
+
+@route("POST", "/api/sheets/test")
+def sheets_test(h, q, b):
+    res = sheets.ping()
+    return {"ok": True, "url": res.get("url"), "version": res.get("version")}
+
+
+@route("POST", "/api/drive/backup")
+def drive_backup_now(h, q, b):
+    return sheets.drive_backup()
+
+
+@route("GET", "/api/backups")
+def backups_list(h, q, b):
+    out = {"local": sheets.local_backups(), "drive": [], "drive_error": ""}
+    if db.get_settings().get("sheets_url"):
+        try:
+            out["drive"] = sheets.drive_list()
+        except Exception as e:  # noqa
+            out["drive_error"] = str(e)
+    return out
+
+
+@route("POST", "/api/restore")
+def restore(h, q, b):
+    if b.get("kind") == "local":
+        name = os.path.basename(b.get("name") or "")
+        p = os.path.join(db.BACKUP_DIR, name)
+        if not name or not os.path.exists(p):
+            raise ApiError("백업 파일이 없습니다.")
+        with open(p, "rb") as f:
+            data = f.read()
+    elif b.get("kind") == "drive":
+        data = sheets.drive_get(b["id"])
+    else:
+        raise ApiError("복원할 백업을 고르세요.")
+    return sheets.restore_from_bytes(data)
+
+
+@route("POST", "/api/restore/upload")
+def restore_upload(h, q, b):
+    if not b:
+        raise ApiError("파일이 비어 있습니다.")
+    return sheets.restore_from_bytes(b)
+
+
+# ───────────────────────── 프롬프트 안내 ─────────────────────────
+
+@route("GET", "/api/prompts")
+def prompts_guide(h, q, b):
+    return {"templates": prompts.guide(db.get_settings())}
+
+
+@route("GET", r"/api/students/(\d+)/notes_text")
+def student_notes_text(h, q, b, sid):
+    conn = db.connect()
+    s = db.row(conn, "SELECT * FROM students WHERE id=?", (int(sid),))
+    notes = db.rows(conn, "SELECT * FROM notes WHERE student_id=? AND use_in_draft=1 ORDER BY date, id", (int(sid),))
+    conn.close()
+    lines = ["- [%s/%s%s] %s" % (n["date"] or "", n["kind"] or "", ("/" + n["category"]) if n["category"] else "", n["content"])
+             for n in notes]
+    return {"text": "\n".join(lines), "count": len(notes)}
+
+
+# ───────────────────────── Whisper (내 맥에서 받아쓰기) ─────────────────────────
+
+@route("GET", "/api/whisper")
+def whisper_status(h, q, b):
+    st = whisper.status()
+    s = db.get_settings()
+    st.update(engine=s.get("stt_engine") or "auto", selected=s.get("whisper_model") or "",
+              active=pipeline.use_whisper(s) and whisper.available())
+    return st
+
+
+@route("POST", "/api/whisper/download")
+def whisper_download(h, q, b):
+    if not whisper.supported():
+        raise ApiError("Whisper는 Apple Silicon(M1 이상) 맥에서만 쓸 수 있습니다.")
+    whisper.download(b["id"])
+    return {"ok": True}
+
+
+@route("POST", "/api/whisper/cancel")
+def whisper_cancel(h, q, b):
+    whisper.cancel(b["id"])
+    return {"ok": True}
+
+
+@route("POST", "/api/whisper/delete")
+def whisper_delete(h, q, b):
+    whisper.delete(b["id"])
+    return {"ok": True}
 
 
 # ───────────────────────── 가져오기 경로 ─────────────────────────
@@ -752,7 +877,14 @@ def open_privacy(h, q, b):
 
 @route("GET", "/api/version")
 def version_info(h, q, b):
-    return {"version": version.VERSION, "repo": version.UPDATE_REPO, "code_dir": db.APP_DIR}
+    return {"version": version.VERSION, "repo": version.UPDATE_REPO, "code_dir": db.APP_DIR,
+            "shell": update.shell_version(), "shell_outdated": update.shell_outdated()}
+
+
+@route("POST", "/api/update/install_app")
+def update_install_app(h, q, b):
+    db.backup_to(os.path.join(db.BACKUP_DIR, "seteuk-before-app-update-%s.db" % datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
+    return update.install_app()
 
 
 @route("GET", "/api/update/check")
@@ -833,7 +965,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 raw = self.rfile.read(length) if length else b""
-                if method == "POST" and path != "/api/recordings/upload":
+                if method == "POST" and not path.endswith("/upload"):
                     body = json.loads(raw.decode("utf-8") or "{}")
                 else:
                     body = raw
@@ -852,8 +984,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("", "/"):
             path = "/index.html"
         if path == "/google_apps_script.gs":
-            with open(os.path.join(db.APP_DIR, "google_apps_script.gs"), "rb") as f:
-                return self._send(200, f.read(), "text/plain; charset=utf-8")
+            with open(os.path.join(db.APP_DIR, "google_apps_script.gs"), encoding="utf-8") as f:
+                text = f.read().replace("var TOKEN = '';", "var TOKEN = '%s';" % ensure_token())
+            return self._send(200, text.encode("utf-8"), "text/plain; charset=utf-8")
         full = os.path.normpath(os.path.join(STATIC_DIR, path.lstrip("/")))
         if not full.startswith(STATIC_DIR) or not os.path.isfile(full):
             full = os.path.join(STATIC_DIR, "index.html")
@@ -928,12 +1061,15 @@ def main():
     try:
         httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     except OSError:
-        print("이미 실행 중입니다. 브라우저를 엽니다.")
-        webbrowser.open("http://%s:%d" % (HOST, PORT))
+        print("이미 실행 중입니다.")
+        if os.environ.get("SETEUK_NO_BROWSER") != "1":
+            webbrowser.open("http://%s:%d" % (HOST, PORT))
         return
     httpd.daemon_threads = True
+    ensure_token()
     pipeline.start_worker()
     watcher.start()
+    sheets.start()
     url = "http://%s:%d" % (HOST, PORT)
     print("세특도우미 %s 실행 중: %s  (코드: %s, 데이터: %s)" % (version.VERSION, url, db.APP_DIR, db.DATA_DIR))
     if os.environ.get("SETEUK_NO_BROWSER") != "1":

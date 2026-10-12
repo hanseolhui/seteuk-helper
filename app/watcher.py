@@ -29,6 +29,8 @@ VOICEMEMO_DIRS = [
     "~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings",
     "~/Library/Application Support/com.apple.voicememos/Recordings",
 ]
+# 아이폰 '세특 녹음/받아쓰기' 단축어가 저장하는 곳 (iCloud Drive › Shortcuts › 세특녹음)
+SHORTCUTS_DIR = "~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/세특녹음"
 _status = {"inbox": "", "voicememo": "", "notes": ""}
 _seen_sizes = {}
 _scan_lock = threading.Lock()
@@ -163,12 +165,29 @@ def _runs_text(payload):
 
 # ───────────────────────── 1. 수신 폴더 ─────────────────────────
 
-def scan_inbox():
+def inbox_dirs():
     settings = db.get_settings()
-    folder = os.path.expanduser(settings.get("inbox_dir") or "")
-    if not folder or not os.path.isdir(folder):
+    dirs = []
+    for d in (settings.get("inbox_dir") or "", SHORTCUTS_DIR):
+        d = os.path.expanduser(d)
+        if d and os.path.isdir(d) and d not in dirs:
+            dirs.append(d)
+    return dirs
+
+
+def scan_inbox():
+    dirs = inbox_dirs()
+    if not dirs:
         _status["inbox"] = "폴더 없음"
         return 0
+    imported = 0
+    for folder in dirs:
+        imported += _scan_folder(folder)
+    _status["inbox"] = "정상"
+    return imported
+
+
+def _scan_folder(folder):
     imported = 0
     done_dir = os.path.join(folder, "처리완료")
     for name in sorted(os.listdir(folder)):
@@ -195,7 +214,6 @@ def scan_inbox():
         except Exception as e:  # noqa
             print("수신 폴더 가져오기 실패:", name, e)
         _seen_sizes.pop(path, None)
-    _status["inbox"] = "정상"
     return imported
 
 
