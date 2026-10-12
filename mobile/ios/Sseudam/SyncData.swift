@@ -296,6 +296,32 @@ final class DataStore: ObservableObject {
 
     func deleteNote(_ n: SNote) { tombstone(&notes, n.uid); changed() }
 
+    func insertDraft(_ d: SDraft) { upsert(&drafts, d); changed() }
+    func deleteDraft(_ d: SDraft) { tombstone(&drafts, d.uid); changed() }
+
+    func setArea(_ n: SNote, _ area: String) {
+        var n = n; n.area = area; n.updated_at = now
+        upsert(&notes, n); changed()
+    }
+
+    /// 이번 학기 반 / 지난 학기 반
+    var currentClasses: [SClass] {
+        let t = DataStore.currentTerm()
+        return activeClasses.filter { ($0.year ?? t.year, $0.semester ?? t.semester) >= (t.year, t.semester) }
+    }
+    var pastClasses: [SClass] {
+        let cur = Set(currentClasses.map(\.uid))
+        return activeClasses.filter { !cur.contains($0.uid) }
+    }
+
+    /// 이름·별칭으로 학생 찾기
+    func search(_ q: String) -> [SStudent] {
+        let q = q.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        return students.filter { !$0.isDeleted && ($0.displayName.contains(q) || ($0.aliases ?? "").contains(q)) && classOf($0).map { !$0.isDeleted } == true }
+            .sorted { $0.displayName < $1.displayName }
+    }
+
     private func upsert<T: Codable & Identifiable>(_ list: inout [T], _ item: T) where T.ID == String {
         if let i = list.firstIndex(where: { $0.id == item.id }) { list[i] = item } else { list.append(item) }
     }
@@ -403,6 +429,56 @@ final class DataStore: ObservableObject {
         changed()
         let left = leftover.joined(separator: " ")
         return SplitResult(count: pieces.count, names: names, leftover: left.count >= 6 ? left : "", unsure: unsure)
+    }
+
+    /// 녹음 중 누른 이름표대로 나누기: 이름표를 누른 뒤 말한 내용은 그 학생 몫.
+    /// 첫 이름표 앞부분은 평소처럼 이름으로 나눈다.
+    func splitByMarkers(text: String, segs: [Transcriber.Seg], markers: [Marker], date: Date, kind: String,
+                        source: String, hint: String) -> SplitResult {
+        for n in notes(forSource: source) { tombstone(&notes, n.uid) }
+        let ns = text as NSString
+        let marks = markers.filter { $0.student != nil }.sorted { $0.t < $1.t }
+        func offset(_ t: Double) -> Int {
+            segs.first(where: { $0.t >= t - 0.3 })?.offset ?? ns.length
+        }
+        func squash(_ s: String) -> String { s.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ") }
+        var names: [String] = []
+        var count = 0
+        var unsure = 0
+        // 1) 첫 이름표 앞: 이름 기준
+        let first = marks.first.map { offset($0.t) } ?? ns.length
+        var leftover = ""
+        if first > 0 {
+            let head = ns.substring(to: min(first, ns.length))
+            let r = Splitter.splitWithLeftover(text: head, hint: hint, classes: activeClasses, studentsIn: { self.students(in: $0) },
+                                               preferKind: kind == "상담" ? "담임" : "교과")
+            for b in r.blocks {
+                guard let s = student(b.studentUID) else { continue }
+                var n = addNote(s, content: b.content, date: date, kind: kind, source: source)
+                if b.ambiguous { n.category = DataStore.unsureTag + ":" + b.candidates.joined(separator: ","); upsert(&notes, n); unsure += 1 }
+                if !names.contains(s.displayName) { names.append(s.displayName) }
+                count += 1
+            }
+            leftover = r.leftover
+        }
+        // 2) 이름표 구간 (같은 학생이 이어지면 합침)
+        var i = 0
+        while i < marks.count {
+            let uid = marks[i].student!
+            var j = i + 1
+            while j < marks.count && marks[j].student == uid { j += 1 }
+            let a = min(offset(marks[i].t), ns.length)
+            let b = j < marks.count ? min(offset(marks[j].t), ns.length) : ns.length
+            let chunk = squash(ns.substring(with: NSRange(location: a, length: max(0, b - a))))
+            if chunk.count >= 2, let s = student(uid) {
+                addNote(s, content: String(chunk.prefix(1200)), date: date, kind: kind, source: source)
+                if !names.contains(s.displayName) { names.append(s.displayName) }
+                count += 1
+            }
+            i = j
+        }
+        changed()
+        return SplitResult(count: count, names: names, leftover: leftover, unsure: unsure)
     }
 
     // MARK: 바로잡기 — 다른 학생으로 옮기기 · 합치기 · 이름 고치기

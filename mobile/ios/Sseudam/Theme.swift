@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 쓰담 디자인: 크림 배경 · 파스텔 · 둥근 글꼴 · 부드러운 카드
 enum Theme {
@@ -17,8 +18,9 @@ enum Theme {
     static let brand = LinearGradient(colors: [blue, lavender], startPoint: .topLeading, endPoint: .bottomTrailing)
     static let warm = LinearGradient(colors: [coral, Color(red: 1, green: 0.66, blue: 0.5)], startPoint: .topLeading, endPoint: .bottomTrailing)
 
+    /// 기기 '글자 크기' 설정을 따라 커진다 (화면이 깨지지 않게 1.5배까지)
     static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
+        .system(size: min(UIFontMetrics.default.scaledValue(for: size), size * 1.5), weight: weight, design: .rounded)
     }
 }
 

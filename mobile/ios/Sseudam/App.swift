@@ -7,6 +7,8 @@ struct SseudamApp: App {
     @StateObject private var nav = Nav.shared
     @StateObject private var data = DataStore.shared
     @StateObject private var lock = AppLock.shared
+
+    init() { WatchBridge.shared.activate() }
     @Environment(\.scenePhase) private var phase
 
     var body: some Scene {
@@ -25,6 +27,11 @@ struct SseudamApp: App {
             .environmentObject(data)
             .tint(Theme.blue)
             .onOpenURL { url in
+                if url.scheme == "sseudam", url.host == "record" {
+                    nav.tab = .home
+                    nav.startRecordingRequest += 1
+                    return
+                }
                 if let p = Sync.parsePairing(url.absoluteString) {
                     store.pair(url: p.url, token: p.token, name: p.name)
                     nav.tab = .connect
@@ -45,6 +52,8 @@ final class Nav: ObservableObject {
     enum Tab: Hashable { case home, records, students, connect }
     @Published var tab: Tab = .home
     @Published var startRecordingRequest = 0
+    /// 처리한 요청 번호 — 앱이 막 켜질 때(화면이 붙기 전) 들어온 요청도 놓치지 않게
+    var handledRecordingRequest = 0
 }
 
 struct RootView: View {

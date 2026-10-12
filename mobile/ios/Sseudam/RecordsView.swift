@@ -128,6 +128,17 @@ struct RecordsView: View {
                         .background((e.kind == "상담" ? Theme.lavender : Theme.blue).opacity(0.14), in: Capsule())
                     syncBadge(e)
                 }
+                if let names = e.splitNames, !names.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "person.2.fill").font(.system(size: 10, weight: .bold))
+                        Text(names.prefix(3).joined(separator: " · ") + (names.count > 3 ? " 외 \(names.count - 3)명" : ""))
+                            .font(Theme.font(12, .semibold)).lineLimit(1)
+                        if e.splitUnsure > 0 || !e.splitLeftover.isEmpty {
+                            Image(systemName: "questionmark.circle.fill").foregroundStyle(Theme.butter)
+                        }
+                    }
+                    .foregroundStyle(Theme.lavender)
+                }
                 if !e.lastError.isEmpty && (e.icloud == .failed || e.google == .failed) {
                     Text(e.lastError).font(Theme.font(11)).foregroundStyle(Theme.coral).lineLimit(2)
                 }
@@ -206,7 +217,9 @@ struct EntryDetail: View {
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack { Text("유형").font(Theme.font(15, .semibold)); Spacer(); KindPicker(kind: $kind).disabled(sent) }
+                    if Features.counseling {
+                        HStack { Text("유형").font(Theme.font(15, .semibold)); Spacer(); KindPicker(kind: $kind).disabled(sent) }
+                    }
                     if current.isAudio {
                         TextField("메모 (예: 2-3 국어 토론)", text: $memo).font(Theme.font(15))
                             .padding(10).background(Theme.bg, in: RoundedRectangle(cornerRadius: 12)).disabled(sent)
@@ -264,6 +277,16 @@ struct EntryDetail: View {
                     Text("아이폰에서 글자로 바꾸는 중…").font(Theme.font(14)).foregroundStyle(Theme.soft)
                 }
             case .done where !current.transcript.isEmpty:
+                if !current.starSnippets.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(current.starSnippets, id: \.self) { s in
+                            Label(s, systemImage: "star.fill").font(Theme.font(14, .semibold))
+                                .foregroundStyle(Theme.ink).labelStyle(StarLabel())
+                        }
+                    }
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.butter.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
                 TextField("받아쓴 글", text: $transcript, axis: .vertical).font(Theme.font(16)).lineLimit(3...20)
                     .disabled(sent)
                 Text(sent ? "컴퓨터로 함께 보냈어요." : "잘못 들린 이름이나 낱말은 여기서 고쳐요. 보낼 때 함께 가요.")
@@ -291,6 +314,15 @@ struct EntryDetail: View {
             case .done: Pill(text: "보냄", icon: "checkmark", color: Theme.mint)
             case .failed: Pill(text: "다시 시도", icon: "exclamationmark.triangle", color: Theme.coral)
             }
+        }
+    }
+}
+
+struct StarLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            configuration.icon.foregroundStyle(Theme.butter).font(.system(size: 12))
+            configuration.title
         }
     }
 }

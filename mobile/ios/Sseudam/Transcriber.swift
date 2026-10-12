@@ -5,7 +5,9 @@ import Speech
 /// 아이폰 안에서 녹음을 글자로 바꾼다 (기기 안 받아쓰기만 사용 — 학생 목소리가 밖으로 나가지 않음).
 /// 받아쓴 글은 m4a의 가사(©lyr) 메타데이터로 넣어 보내므로, 컴퓨터의 쓰담이 다시 받아쓸 필요가 없다.
 enum Transcriber {
-    enum Outcome { case text(String), unavailable(String), failed(String) }
+    /// 낱말마다 (녹음 시작부터 초, 글 안 위치(UTF-16)) — 녹음 중 누른 이름표를 글 위치로 바꿀 때 씀
+    struct Seg { var t: Double; var offset: Int }
+    enum Outcome { case text(String, [Seg]), unavailable(String), failed(String) }
 
     static var recognizer: SFSpeechRecognizer? { SFSpeechRecognizer(locale: Locale(identifier: "ko-KR")) }
 
@@ -41,13 +43,14 @@ enum Transcriber {
                 if done { return }
                 if let result, result.isFinal {
                     done = true
-                    c.resume(returning: .text(result.bestTranscription.formattedString))
+                    let tr = result.bestTranscription
+                    c.resume(returning: .text(tr.formattedString, tr.segments.map { Seg(t: $0.timestamp, offset: $0.substringRange.location) }))
                 } else if let error {
                     done = true
                     let ns = error as NSError
                     // 말소리가 없으면 'No speech detected' 오류가 난다 → 빈 글로 처리
                     if ns.domain == "kAFAssistantErrorDomain" && [1110, 1101].contains(ns.code) {
-                        c.resume(returning: .text(""))
+                        c.resume(returning: .text("", []))
                     } else {
                         c.resume(returning: .failed(error.localizedDescription))
                     }

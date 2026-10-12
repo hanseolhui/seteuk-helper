@@ -6,15 +6,37 @@ struct StudentsView: View {
     @EnvironmentObject var store: Store
     @State private var addingClass = false
     @State private var exportURL: URL?
+    @State private var query = ""
+    @State private var showPast = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    syncCard
-                    if data.activeClasses.isEmpty { empty } else {
-                        ForEach(data.activeClasses) { c in
-                            NavigationLink { ClassDetail(cls: c) } label: { classRow(c) }.buttonStyle(.plain)
+                    if !query.isEmpty {
+                        searchResults
+                    } else {
+                        syncCard
+                        if data.activeClasses.isEmpty { empty } else {
+                            ForEach(data.currentClasses) { c in
+                                NavigationLink { ClassDetail(cls: c) } label: { classRow(c) }.buttonStyle(.plain)
+                            }
+                            if !data.pastClasses.isEmpty {
+                                Button { withAnimation(.spring(response: 0.4)) { showPast.toggle() } } label: {
+                                    HStack {
+                                        Label("지난 학기 반 \(data.pastClasses.count)개", systemImage: "archivebox").font(Theme.font(14, .bold))
+                                        Spacer()
+                                        Image(systemName: "chevron.down").rotationEffect(.degrees(showPast ? 180 : 0))
+                                    }
+                                    .foregroundStyle(Theme.soft).padding(.horizontal, 6).padding(.top, 6)
+                                }
+                                if showPast {
+                                    ForEach(data.pastClasses) { c in
+                                        NavigationLink { ClassDetail(cls: c) } label: { classRow(c).opacity(0.8) }.buttonStyle(.plain)
+                                            .transition(.move(edge: .top).combined(with: .opacity))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -22,6 +44,7 @@ struct StudentsView: View {
             }
             .softBackground()
             .navigationTitle("학생")
+            .searchable(text: $query, prompt: "학생 이름 찾기")
             .refreshable { await data.syncNow() }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -37,6 +60,26 @@ struct StudentsView: View {
             .sheet(isPresented: $addingClass) { AddClassSheet() }
             .sheet(item: Binding(get: { exportURL.map(ShareItem.init) }, set: { if $0 == nil { exportURL = nil } })) { item in
                 ShareSheet(url: item.url)
+            }
+        }
+    }
+
+    var searchResults: some View {
+        let list = data.search(query)
+        return VStack(alignment: .leading, spacing: 10) {
+            if list.isEmpty {
+                Text("‘\(query)’ 학생을 찾지 못했어요").font(Theme.font(15)).foregroundStyle(Theme.soft).padding(.top, 20)
+            }
+            ForEach(list) { s in
+                NavigationLink { StudentDetail(student: s) } label: {
+                    HStack(spacing: 12) {
+                        StudentChip(student: s)
+                        Text(data.classOf(s)?.title ?? "").font(Theme.font(13)).foregroundStyle(Theme.soft)
+                        Spacer()
+                        Text("기록 \(data.notes(of: s).count)").font(Theme.font(12, .bold)).foregroundStyle(Theme.soft)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).card()
+                }.buttonStyle(.plain)
             }
         }
     }
@@ -137,6 +180,7 @@ struct ClassDetail: View {
     @State private var pasting = false
     @State private var confirmDelete = false
     @State private var editing: SStudent?
+    @State private var drafting = false
 
     var body: some View {
         List {
@@ -170,11 +214,8 @@ struct ClassDetail: View {
                                 .frame(width: 26)
                             Text(s.displayName).font(Theme.font(16, .semibold))
                             Spacer()
-                            let n = data.notes(of: s).count
-                            if n > 0 {
-                                Text("\(n)").font(Theme.font(12, .bold)).padding(.horizontal, 8).padding(.vertical, 3)
-                                    .background(kindColor(cls.kind).opacity(0.16), in: Capsule()).foregroundStyle(kindColor(cls.kind))
-                            }
+                            CountBar(count: data.notes(of: s).count,
+                                     maxCount: list.map { data.notes(of: $0).count }.max() ?? 1, color: kindColor(cls.kind))
                         }
                     }
                     .swipeActions {
@@ -182,6 +223,11 @@ struct ClassDetail: View {
                         Button("고치기") { editing = s }.tint(Theme.blue)
                     }
                     .contextMenu {
+                        Section("빠른 기록") {
+                            ForEach(QuickTags.all, id: \.text) { t in
+                                Button("\(t.emoji) \(t.text)") { data.addNote(s, content: t.text) }
+                            }
+                        }
                         Button { editing = s } label: { Label("이름 고치기 · 합치기", systemImage: "pencil") }
                         Button(role: .destructive) { withAnimation { data.deleteStudent(s) } } label: { Label("지우기", systemImage: "trash") }
                     }
@@ -197,6 +243,7 @@ struct ClassDetail: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
+                    Button { drafting = true } label: { Label("반 전체 초안 (ChatGPT·Gemini)", systemImage: "wand.and.stars") }
                     Button { pasting = true } label: { Label("학생 더하기 · 명단 붙여넣기", systemImage: "person.badge.plus") }
                     Button(role: .destructive) { confirmDelete = true } label: { Label("이 반 지우기", systemImage: "trash") }
                 } label: { Image(systemName: "ellipsis.circle") }
@@ -204,6 +251,7 @@ struct ClassDetail: View {
         }
         .sheet(isPresented: $pasting) { RosterSheet(cls: cls) }
         .sheet(item: $editing) { s in StudentEditSheet(student: s) }
+        .sheet(isPresented: $drafting) { ClassDraftSheet(cls: cls) }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: data.students(in: cls).map(\.uid))
         .alert("이 반을 지울까요?", isPresented: $confirmDelete) {
             Button("지우기", role: .destructive) { data.deleteClass(cls); dismiss() }
@@ -224,6 +272,7 @@ struct StudentDetail: View {
     @State private var editingStudent = false
     @State private var moving: SNote?
     @State private var promptCopied = false
+    @State private var pdfURL: URL?
     @FocusState private var focused: Bool
     @Environment(\.dismiss) private var dismiss
 
@@ -235,6 +284,7 @@ struct StudentDetail: View {
                 header
                 if !data.notes(of: student).isEmpty { summaryCard }
                 addCard
+                tagCard
                 let drafts = data.drafts(of: student)
                 if !drafts.isEmpty {
                     Text("초안").font(Theme.font(15, .bold)).foregroundStyle(Theme.soft).padding(.leading, 4)
@@ -258,9 +308,15 @@ struct StudentDetail: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button { editingStudent = true } label: { Image(systemName: "pencil.circle") }.accessibilityLabel("학생 정보 고치기")
+                Menu {
+                    Button { editingStudent = true } label: { Label("이름·별칭 고치기", systemImage: "pencil") }
+                    Button { pdfURL = StudentPDF.make(student: student, cls: cls, notes: data.notes(of: student), drafts: data.drafts(of: student)) } label: {
+                        Label("PDF 한 장으로 내보내기", systemImage: "doc.richtext")
+                    }
+                } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("학생 메뉴")
             }
         }
+        .sheet(item: Binding(get: { pdfURL.map(ShareItem.init) }, set: { if $0 == nil { pdfURL = nil } })) { ShareSheet(url: $0.url) }
         .sheet(isPresented: $editingStudent) { StudentEditSheet(student: data.student(student.uid) ?? student) { dismiss() } }
         .sheet(item: $moving) { n in
             StudentPicker(title: "누구의 기록인가요?", suggested: data.candidates(n), current: n.student_uid) { s in
@@ -269,14 +325,28 @@ struct StudentDetail: View {
         }
         .sheet(item: $editing) { n in
             NavigationStack {
-                TextEditor(text: $editText).font(Theme.font(16)).padding()
-                    .navigationTitle("기록 고치기").navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("취소") { editing = nil } }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("저장") { data.editNote(n, content: editText); editing = nil }
-                        }
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        StudentChip(student: student)
+                        Text(friendlyDate(n.date)).font(Theme.font(13, .semibold)).foregroundStyle(Theme.soft)
+                        Spacer()
+                        Text("\(editText.count)자").font(Theme.font(12, .semibold)).foregroundStyle(Theme.soft)
                     }
+                    TextEditor(text: $editText).font(Theme.font(17)).scrollContentBackground(.hidden)
+                        .padding(12).frame(minHeight: 180)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    Text("있었던 일 그대로 짧게 고쳐 주세요. 초안은 이 기록을 바탕으로 만들어져요 ✍️")
+                        .font(Theme.font(12)).foregroundStyle(Theme.soft)
+                    Spacer()
+                }
+                .padding(18).softBackground()
+                .navigationTitle("기록 고치기").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("취소") { editing = nil } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("저장") { withAnimation { data.editNote(n, content: editText) }; editing = nil }.fontWeight(.bold)
+                    }
+                }
             }.presentationDetents([.medium, .large])
         }
     }
@@ -316,7 +386,9 @@ struct StudentDetail: View {
                 .font(Theme.font(15)).lineLimit(1...5).focused($focused)
                 .padding(12).background(Theme.bg, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             HStack {
-                Text("키보드의 🎤로 말해도 돼요").font(Theme.font(12)).foregroundStyle(Theme.soft)
+                PhotoCaptureButtons { t in
+                    if !t.isEmpty { newNote = newNote.isEmpty ? t : newNote + "\n" + t; focused = true }
+                }
                 Spacer()
                 Button {
                     let t = newNote.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -331,6 +403,15 @@ struct StudentDetail: View {
                         .foregroundStyle(.white)
                 }.buttonStyle(Squishy())
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+    }
+
+    var tagCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("톡 눌러 바로 담기").font(Theme.font(13, .bold)).foregroundStyle(Theme.soft)
+            QuickTagRow(student: student)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card()
@@ -359,6 +440,13 @@ struct StudentDetail: View {
                 Menu {
                     Button { editText = n.content ?? ""; editing = n } label: { Label("고치기", systemImage: "pencil") }
                     Button { moving = n } label: { Label("다른 학생으로 옮기기", systemImage: "arrow.right.arrow.left") }
+                    Menu {
+                        ForEach(Areas.all, id: \.id) { a in
+                            Button { data.setArea(n, a.id) } label: {
+                                if (n.area?.isEmpty == false ? n.area : Areas.forKind(cls?.kind).first) == a.id { Label(a.name, systemImage: "checkmark") } else { Text(a.name) }
+                            }
+                        }
+                    } label: { Label("영역 바꾸기", systemImage: "square.grid.2x2") }
                     if data.isUnsure(n) {
                         Button { data.confirmNote(n) } label: { Label("이 학생이 맞아요", systemImage: "checkmark") }
                     }
@@ -466,9 +554,14 @@ struct StudentDetail: View {
                 Button { UIPasteboard.general.string = text } label: { Image(systemName: "doc.on.doc") }
             }
             Text(text).font(Theme.font(15)).fixedSize(horizontal: false, vertical: true)
+            CheckList(text: text, limit: limit)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card()
+        .contextMenu {
+            Button { UIPasteboard.general.string = text } label: { Label("복사", systemImage: "doc.on.doc") }
+            Button(role: .destructive) { withAnimation { data.deleteDraft(d) } } label: { Label("초안 지우기", systemImage: "trash") }
+        }
     }
 }
 

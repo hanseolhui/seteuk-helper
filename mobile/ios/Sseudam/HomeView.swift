@@ -5,6 +5,8 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var nav: Nav
+    @EnvironmentObject var data: DataStore
+    @AppStorage("markClass") private var markClass = ""
     @StateObject private var rec = Recorder()
     @State private var memoText = ""
     @State private var memoKind = Store.shared.lastKind
@@ -36,10 +38,10 @@ struct HomeView: View {
                 Button("설정 열기") { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
                 Button("닫기", role: .cancel) {}
             } message: { Text("설정 → 쓰담 → 마이크를 켜 주세요.") }
-            .onChange(of: nav.startRecordingRequest) { _ in
-                if !rec.isRecording { Task { await rec.start() } }
-            }
+            .onChange(of: nav.startRecordingRequest) { _ in checkStartRequest() }
+            .onAppear { checkStartRequest() }
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: store.justSaved)
+            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: rec.isRecording)
         }
     }
 
@@ -113,6 +115,12 @@ struct HomeView: View {
 
             Text(statusText).font(Theme.font(14)).foregroundStyle(Theme.soft).multilineTextAlignment(.center)
 
+            if rec.isRecording && !rec.liveText.isEmpty {
+                LiveCaption(text: rec.liveText).transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+            if rec.isRecording && data.hasRoster {
+                markStrip.transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
             if rec.isRecording {
                 HStack(spacing: 10) {
                     Button { rec.togglePause() } label: {
@@ -133,9 +141,78 @@ struct HomeView: View {
         .card(padding: 22)
     }
 
+    /// 녹음하면서 톡: 이 학생 이야기 / ⭐ 중요
+    var markClassObj: SClass? {
+        data.currentClasses.first { $0.uid == markClass } ?? data.currentClasses.first ?? data.activeClasses.first
+    }
+
+    var markStrip: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("누구 이야기인지 톡").font(Theme.font(13, .bold)).foregroundStyle(Theme.soft)
+                Menu {
+                    ForEach(data.activeClasses) { c in Button(c.title) { markClass = c.uid } }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(markClassObj?.title ?? "반 고르기").font(Theme.font(12, .bold))
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                    }
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(Theme.blue.opacity(0.12), in: Capsule()).foregroundStyle(Theme.blue)
+                }
+                Spacer()
+                Button {
+                    rec.star()
+                    UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+                } label: {
+                    Label("\(rec.markers.filter(\.star).count)", systemImage: "star.fill").font(Theme.font(13, .bold))
+                        .padding(.horizontal, 11).padding(.vertical, 6)
+                        .background(Theme.butter.opacity(0.2), in: Capsule()).foregroundStyle(Theme.butter)
+                        .contentTransition(.numericText())
+                }
+                .buttonStyle(Squishy())
+                .accessibilityLabel("중요한 순간 표시")
+            }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(markClassObj.map { data.students(in: $0) } ?? []) { s in
+                            let on = rec.currentStudent == s.uid
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { rec.mark(student: s.uid) }
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            } label: {
+                                Text(s.displayName).font(Theme.font(14, on ? .bold : .semibold))
+                                    .padding(.horizontal, 12).padding(.vertical, 8)
+                                    .background(on ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Theme.bg), in: Capsule())
+                                    .foregroundStyle(on ? .white : Theme.ink)
+                                    .scaleEffect(on ? 1.06 : 1)
+                            }
+                            .buttonStyle(Squishy())
+                            .id(s.uid)
+                        }
+                    }
+                }
+                .onChange(of: rec.currentStudent) { id in if let id { withAnimation { proxy.scrollTo(id, anchor: .center) } } }
+            }
+            if let cur = rec.currentStudent, let s = data.student(cur) {
+                Text("지금부터 \(s.displayName) 이야기로 담아요 ✍️").font(Theme.font(12, .semibold)).foregroundStyle(Theme.lavender)
+            }
+        }
+        .padding(12)
+        .background(Theme.bg.opacity(0.6), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
     var statusText: String {
         if !rec.isRecording { return "학년·반·이름부터 말하면 학생별로 쏙쏙 담겨요 ✨\n“2학년 3반 김민수! 친구 의견 모아 멋지게 발표 🌟”" }
         return rec.isPaused ? "잠깐 멈췄어요" : "화면을 꺼도 계속 녹음돼요 · 끝나면 한 번 더 누르세요"
+    }
+
+    /// 위젯·제어센터·단축어·워치에서 온 '녹음 시작' 요청
+    func checkStartRequest() {
+        guard nav.startRecordingRequest > nav.handledRecordingRequest else { return }
+        nav.handledRecordingRequest = nav.startRecordingRequest
+        if !rec.isRecording { Task { await rec.start(hints: data.rosterNames) } }
     }
 
     func toggle() {
@@ -144,13 +221,13 @@ struct HomeView: View {
             if let r = rec.stop() {
                 if r.1 < 1 { try? FileManager.default.removeItem(at: r.0) }
                 else {
-                    store.addAudio(tempFile: r.0, duration: r.1, at: r.2)
+                    store.addAudio(tempFile: r.0, duration: r.1, at: r.2, markers: r.3)
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                 }
             }
         } else {
             memoFocused = false
-            Task { await rec.start() }
+            Task { await rec.start(hints: data.rosterNames) }
         }
     }
 
@@ -220,9 +297,17 @@ struct HomeView: View {
 }
 
 /// 수업 / 상담 선택 알약
+/// 지금은 혼자 녹음하는 수업 기록 위주 — 상담 유형은 나중에 켠다
+enum Features {
+    static let counseling = false
+}
+
 struct KindPicker: View {
     @Binding var kind: String
     var body: some View {
+        if Features.counseling { picker }
+    }
+    var picker: some View {
         HStack(spacing: 4) {
             ForEach(["수업", "상담"], id: \.self) { k in
                 Button { withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { kind = k } } label: {
@@ -319,6 +404,28 @@ extension SavedCard {
         if e.icloud == .done || e.google == .done { return "icloud.and.arrow.up" }
         if remaining > 0 || e.stt == .working { return "clock" }
         return "iphone"
+    }
+}
+
+/// 녹음 중 실시간 글자 (마지막 몇 줄만)
+struct LiveCaption: View {
+    var text: String
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                Text(text).font(Theme.font(15)).foregroundStyle(Theme.ink)
+                    .frame(maxWidth: .infinity, alignment: .leading).id("end")
+            }
+            .frame(maxHeight: 76)
+            .onChange(of: text) { _ in proxy.scrollTo("end", anchor: .bottom) }
+        }
+        .padding(12)
+        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(alignment: .topTrailing) {
+            Text("실시간").font(Theme.font(10, .bold)).padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Theme.coral.opacity(0.15), in: Capsule()).foregroundStyle(Theme.coral).padding(6)
+        }
+        .animation(.easeOut(duration: 0.2), value: text)
     }
 }
 

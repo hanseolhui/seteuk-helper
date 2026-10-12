@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		0D84A182B6AA5651276E23D7 /* SyncData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7947B9B02A1ECD1EA1C82D13 /* SyncData.swift */; };
+		103183D0B7B826444E42240D /* DraftTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59B2DA838F91102FE689C18 /* DraftTools.swift */; };
+		239D6AD09F738D7446B2A6BE /* SseudamWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A602516E9254AA9569E5CDD0 /* SseudamWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		2CE9844BCEBC52E55B5405F8 /* AssignViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3062820F22EC3F4C3D9B59 /* AssignViews.swift */; };
 		3397DEE58ED436C15D1945DC /* StudentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16AA1BC28AEFBB92714E8E8A /* StudentsView.swift */; };
 		3461824010FB4D253F770882 /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE147E1357C039411699FAD9 /* ConnectView.swift */; };
@@ -17,22 +19,76 @@
 		643303B738F3711C7FD66760 /* AIEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13991F5DEA4767DA151166A9 /* AIEngine.swift */; };
 		64EC77FCADC55903F401479E /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A6FF75DAAEF58C8169B93BA /* Store.swift */; };
 		66248BE255EA0983C6CEC250 /* LocalAI.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB3F662A6402A5CB85D66D87 /* LocalAI.swift */; };
+		745C8E5F4518AF4FF7F4923E /* OpenRecordIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9EB58E1007EDBA6224B5847 /* OpenRecordIntent.swift */; };
+		78324E7584CD06AC0BDB62CC /* QuickTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1234B6D27099EB65742E6EE /* QuickTools.swift */; };
+		8DE7AD571866E12BCDA77E66 /* SseudamWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BF3EDFF11AF5873026BEA3FD /* SseudamWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		9265876BF8B55B69C3C77300 /* Splitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A3943703E4149A7920EC8DB /* Splitter.swift */; };
 		A0DBD6B3B9C43ED9F8A39AAF /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81BF9F702054C7D3E05CD87F /* OnboardingView.swift */; };
 		A25527A0C1C17C7A079951CC /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71366FB65970277E46A7A98E /* App.swift */; };
 		A280D61CF927D06ACA06062E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AEA1284C4F15C899D71C7C32 /* Assets.xcassets */; };
 		B0708AF70260D3F3D0F6CBAC /* RecordsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2BAE67B406D313F4E1BFD09 /* RecordsView.swift */; };
+		B084C193C0C3E8C806AFD167 /* SseudamWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39C21F7A16DF46704C202742 /* SseudamWidgets.swift */; };
+		B91B47E9A997FDA09ADB9978 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 91CE084E05DB0FFCDE406623 /* Assets.xcassets */; };
+		C9CE4490995BCD332C540171 /* OpenRecordIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9EB58E1007EDBA6224B5847 /* OpenRecordIntent.swift */; };
 		D0202EB2EF401B5854A64FAF /* Sync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AFF827D0C38F5B88128BEAA /* Sync.swift */; };
+		D33CD62E46CCE74CA28F043E /* WatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B32E604D39B0EE71A09D9747 /* WatchBridge.swift */; };
 		E25827922962BBE4A760772B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F38DCE2471C61BA059A9FE94 /* Theme.swift */; };
+		E63311C52C78C83E3D76F5B6 /* WatchRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B80DF6CEDEC6B668485597D /* WatchRecorder.swift */; };
+		F0691AAE0B85D46971652793 /* SseudamWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E99527ED634E25B9619D48CD /* SseudamWatchApp.swift */; };
 		F890B0480EE1B42BE68562B7 /* Transcriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E5449A2CB691CE4F5132412 /* Transcriber.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		879101BAAAABE4F4544BD9E7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CFA5CAA658052CB89D229EDF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 018B0845F383E4A9C28F29D0;
+			remoteInfo = SseudamWidgets;
+		};
+		BC94A1C7F357653CF6296C33 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CFA5CAA658052CB89D229EDF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6A5632B02F8F196FA8A2088A;
+			remoteInfo = SseudamWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		10CC47EDE6A9A1E6CC320B98 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				239D6AD09F738D7446B2A6BE /* SseudamWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D2E1289400136072A58C549F /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				8DE7AD571866E12BCDA77E66 /* SseudamWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		023B5DCEA8B73B4B5DCC95DE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		13991F5DEA4767DA151166A9 /* AIEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIEngine.swift; sourceTree = "<group>"; };
 		16AA1BC28AEFBB92714E8E8A /* StudentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudentsView.swift; sourceTree = "<group>"; };
 		2E5449A2CB691CE4F5132412 /* Transcriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcriber.swift; sourceTree = "<group>"; };
+		39C21F7A16DF46704C202742 /* SseudamWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SseudamWidgets.swift; sourceTree = "<group>"; };
 		3A6FF75DAAEF58C8169B93BA /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
 		3F2CE36A4BB3BC47AA4D7B44 /* AppLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLock.swift; sourceTree = "<group>"; };
+		45175D3DF501C79DEECEA5D5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5AFF827D0C38F5B88128BEAA /* Sync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sync.swift; sourceTree = "<group>"; };
 		605EF2F258552343BF899203 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		71366FB65970277E46A7A98E /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
@@ -40,14 +96,23 @@
 		7947B9B02A1ECD1EA1C82D13 /* SyncData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncData.swift; sourceTree = "<group>"; };
 		81BF9F702054C7D3E05CD87F /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		8A3943703E4149A7920EC8DB /* Splitter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Splitter.swift; sourceTree = "<group>"; };
+		91CE084E05DB0FFCDE406623 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9B80DF6CEDEC6B668485597D /* WatchRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchRecorder.swift; sourceTree = "<group>"; };
 		9BD0D2D816588F4CF251ACAC /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		A1234B6D27099EB65742E6EE /* QuickTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTools.swift; sourceTree = "<group>"; };
+		A602516E9254AA9569E5CDD0 /* SseudamWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SseudamWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AC3062820F22EC3F4C3D9B59 /* AssignViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssignViews.swift; sourceTree = "<group>"; };
 		AEA1284C4F15C899D71C7C32 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B32E604D39B0EE71A09D9747 /* WatchBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchBridge.swift; sourceTree = "<group>"; };
 		BB3F662A6402A5CB85D66D87 /* LocalAI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAI.swift; sourceTree = "<group>"; };
+		BF3EDFF11AF5873026BEA3FD /* SseudamWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = SseudamWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C2BAE67B406D313F4E1BFD09 /* RecordsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsView.swift; sourceTree = "<group>"; };
 		CE147E1357C039411699FAD9 /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
+		E99527ED634E25B9619D48CD /* SseudamWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SseudamWatchApp.swift; sourceTree = "<group>"; };
+		E9EB58E1007EDBA6224B5847 /* OpenRecordIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRecordIntent.swift; sourceTree = "<group>"; };
 		EBF057AE1C9754955DF8AE06 /* Sseudam.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Sseudam.entitlements; sourceTree = "<group>"; };
 		F38DCE2471C61BA059A9FE94 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		F59B2DA838F91102FE689C18 /* DraftTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftTools.swift; sourceTree = "<group>"; };
 		F955F5BA710F49B8D0B2DCF0 /* Recorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Recorder.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -55,15 +120,40 @@
 		1F6F5C63B5785D2E377EF9D9 = {
 			isa = PBXGroup;
 			children = (
+				D254578E88057F4B61090339 /* Shared */,
 				A2930722CF9567A949A2B04A /* Sseudam */,
+				3FFFD3B47708069381FD5BBE /* SseudamWatch */,
+				7A668E914648563D9A8BF016 /* SseudamWidgets */,
 				8BC38CAD7853D349DF02A956 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		3FFFD3B47708069381FD5BBE /* SseudamWatch */ = {
+			isa = PBXGroup;
+			children = (
+				91CE084E05DB0FFCDE406623 /* Assets.xcassets */,
+				45175D3DF501C79DEECEA5D5 /* Info.plist */,
+				E99527ED634E25B9619D48CD /* SseudamWatchApp.swift */,
+				9B80DF6CEDEC6B668485597D /* WatchRecorder.swift */,
+			);
+			path = SseudamWatch;
+			sourceTree = "<group>";
+		};
+		7A668E914648563D9A8BF016 /* SseudamWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				023B5DCEA8B73B4B5DCC95DE /* Info.plist */,
+				39C21F7A16DF46704C202742 /* SseudamWidgets.swift */,
+			);
+			path = SseudamWidgets;
 			sourceTree = "<group>";
 		};
 		8BC38CAD7853D349DF02A956 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				78BA9E4FC47FF7355E65007B /* Sseudam.app */,
+				A602516E9254AA9569E5CDD0 /* SseudamWatch.app */,
+				BF3EDFF11AF5873026BEA3FD /* SseudamWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -77,10 +167,12 @@
 				AEA1284C4F15C899D71C7C32 /* Assets.xcassets */,
 				AC3062820F22EC3F4C3D9B59 /* AssignViews.swift */,
 				CE147E1357C039411699FAD9 /* ConnectView.swift */,
+				F59B2DA838F91102FE689C18 /* DraftTools.swift */,
 				9BD0D2D816588F4CF251ACAC /* HomeView.swift */,
 				605EF2F258552343BF899203 /* Info.plist */,
 				BB3F662A6402A5CB85D66D87 /* LocalAI.swift */,
 				81BF9F702054C7D3E05CD87F /* OnboardingView.swift */,
+				A1234B6D27099EB65742E6EE /* QuickTools.swift */,
 				F955F5BA710F49B8D0B2DCF0 /* Recorder.swift */,
 				C2BAE67B406D313F4E1BFD09 /* RecordsView.swift */,
 				8A3943703E4149A7920EC8DB /* Splitter.swift */,
@@ -91,23 +183,71 @@
 				7947B9B02A1ECD1EA1C82D13 /* SyncData.swift */,
 				F38DCE2471C61BA059A9FE94 /* Theme.swift */,
 				2E5449A2CB691CE4F5132412 /* Transcriber.swift */,
+				B32E604D39B0EE71A09D9747 /* WatchBridge.swift */,
 			);
 			path = Sseudam;
+			sourceTree = "<group>";
+		};
+		D254578E88057F4B61090339 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				E9EB58E1007EDBA6224B5847 /* OpenRecordIntent.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		018B0845F383E4A9C28F29D0 /* SseudamWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F6DAFE3BF34612BD70F753CF /* Build configuration list for PBXNativeTarget "SseudamWidgets" */;
+			buildPhases = (
+				E491BCF68B7BD081D0DAE40A /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SseudamWidgets;
+			packageProductDependencies = (
+			);
+			productName = SseudamWidgets;
+			productReference = BF3EDFF11AF5873026BEA3FD /* SseudamWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		6A5632B02F8F196FA8A2088A /* SseudamWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E355A1123AB8C19BAE7895E4 /* Build configuration list for PBXNativeTarget "SseudamWatch" */;
+			buildPhases = (
+				220508A8AC94543B83AF140A /* Sources */,
+				6E885323CB7EB7ED536C1A4F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SseudamWatch;
+			packageProductDependencies = (
+			);
+			productName = SseudamWatch;
+			productReference = A602516E9254AA9569E5CDD0 /* SseudamWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
 		A8D2DAAF50C6D05318E28AC9 /* Sseudam */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 482B9F1FB8BB5BA0CF62B5EA /* Build configuration list for PBXNativeTarget "Sseudam" */;
 			buildPhases = (
 				D2FE8E4E6BC0168B515991A9 /* Sources */,
 				8A63A4341A1335ED6E6A0B27 /* Resources */,
+				D2E1289400136072A58C549F /* Embed Foundation Extensions */,
+				10CC47EDE6A9A1E6CC320B98 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				49AA5AFF2EFDD5F6AC8D05F3 /* PBXTargetDependency */,
+				7E386B3434E19CD8E079D5D6 /* PBXTargetDependency */,
 			);
 			name = Sseudam;
 			packageProductDependencies = (
@@ -125,6 +265,14 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					018B0845F383E4A9C28F29D0 = {
+						DevelopmentTeam = 967DUR6926;
+						ProvisioningStyle = Automatic;
+					};
+					6A5632B02F8F196FA8A2088A = {
+						DevelopmentTeam = 967DUR6926;
+						ProvisioningStyle = Automatic;
+					};
 					A8D2DAAF50C6D05318E28AC9 = {
 						DevelopmentTeam = 967DUR6926;
 						ProvisioningStyle = Automatic;
@@ -146,11 +294,21 @@
 			projectRoot = "";
 			targets = (
 				A8D2DAAF50C6D05318E28AC9 /* Sseudam */,
+				018B0845F383E4A9C28F29D0 /* SseudamWidgets */,
+				6A5632B02F8F196FA8A2088A /* SseudamWatch */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		6E885323CB7EB7ED536C1A4F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B91B47E9A997FDA09ADB9978 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		8A63A4341A1335ED6E6A0B27 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -162,6 +320,15 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		220508A8AC94543B83AF140A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F0691AAE0B85D46971652793 /* SseudamWatchApp.swift in Sources */,
+				E63311C52C78C83E3D76F5B6 /* WatchRecorder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D2FE8E4E6BC0168B515991A9 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -171,9 +338,12 @@
 				3FA55CD3B5AC7F00AB35D199 /* AppLock.swift in Sources */,
 				2CE9844BCEBC52E55B5405F8 /* AssignViews.swift in Sources */,
 				3461824010FB4D253F770882 /* ConnectView.swift in Sources */,
+				103183D0B7B826444E42240D /* DraftTools.swift in Sources */,
 				3CCC1D476D7F96DEB290DD9E /* HomeView.swift in Sources */,
 				66248BE255EA0983C6CEC250 /* LocalAI.swift in Sources */,
 				A0DBD6B3B9C43ED9F8A39AAF /* OnboardingView.swift in Sources */,
+				C9CE4490995BCD332C540171 /* OpenRecordIntent.swift in Sources */,
+				78324E7584CD06AC0BDB62CC /* QuickTools.swift in Sources */,
 				52261A6115B359EC32412053 /* Recorder.swift in Sources */,
 				B0708AF70260D3F3D0F6CBAC /* RecordsView.swift in Sources */,
 				9265876BF8B55B69C3C77300 /* Splitter.swift in Sources */,
@@ -183,12 +353,54 @@
 				0D84A182B6AA5651276E23D7 /* SyncData.swift in Sources */,
 				E25827922962BBE4A760772B /* Theme.swift in Sources */,
 				F890B0480EE1B42BE68562B7 /* Transcriber.swift in Sources */,
+				D33CD62E46CCE74CA28F043E /* WatchBridge.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E491BCF68B7BD081D0DAE40A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				745C8E5F4518AF4FF7F4923E /* OpenRecordIntent.swift in Sources */,
+				B084C193C0C3E8C806AFD167 /* SseudamWidgets.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		49AA5AFF2EFDD5F6AC8D05F3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 018B0845F383E4A9C28F29D0 /* SseudamWidgets */;
+			targetProxy = 879101BAAAABE4F4544BD9E7 /* PBXContainerItemProxy */;
+		};
+		7E386B3434E19CD8E079D5D6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6A5632B02F8F196FA8A2088A /* SseudamWatch */;
+			targetProxy = BC94A1C7F357653CF6296C33 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		0F715270EA4601B347AC6966 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = SseudamWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = kr.sseudam.app.widgets;
+				PRODUCT_NAME = SseudamWidgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) WIDGET_EXTENSION";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		28E26D496CBE04F4A3026FE1 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -242,7 +454,6 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -310,13 +521,26 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
+		};
+		787E8A08A776780C7934B8C8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = SseudamWatch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = kr.sseudam.app.watchkitapp;
+				PRODUCT_NAME = SseudamWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
 		};
 		CE73B764092088D8D9E312ED /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -356,6 +580,39 @@
 			};
 			name = Debug;
 		};
+		F8B009BCB4559804D18994A8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = SseudamWatch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = kr.sseudam.app.watchkitapp;
+				PRODUCT_NAME = SseudamWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		F9F7E900AE11C8B968B070DD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = SseudamWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = kr.sseudam.app.widgets;
+				PRODUCT_NAME = SseudamWidgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) WIDGET_EXTENSION";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -373,6 +630,24 @@
 			buildConfigurations = (
 				D1B9214D401089C273A9EC73 /* Debug */,
 				CE73B764092088D8D9E312ED /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E355A1123AB8C19BAE7895E4 /* Build configuration list for PBXNativeTarget "SseudamWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F8B009BCB4559804D18994A8 /* Debug */,
+				787E8A08A776780C7934B8C8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F6DAFE3BF34612BD70F753CF /* Build configuration list for PBXNativeTarget "SseudamWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0F715270EA4601B347AC6966 /* Debug */,
+				F9F7E900AE11C8B968B070DD /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

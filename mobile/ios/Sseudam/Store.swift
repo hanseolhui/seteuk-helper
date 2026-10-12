@@ -33,6 +33,10 @@ struct Entry: Codable, Identifiable, Equatable {
     var splitLeftover: String = ""
     var splitUnsure: Int = 0
     var aiRefined: Bool = false
+    /// 녹음 중 누른 이름표·⭐
+    var markers: [Marker] = []
+    /// ⭐ 누른 순간의 문장들
+    var starSnippets: [String] = []
 
     var isAudio: Bool { type == "audio" }
     var editableUntil: Date { (savedAt ?? createdAt).addingTimeInterval(Store.grace) }
@@ -72,6 +76,8 @@ struct Entry: Codable, Identifiable, Equatable {
         splitLeftover = try c.decodeIfPresent(String.self, forKey: .splitLeftover) ?? ""
         splitUnsure = try c.decodeIfPresent(Int.self, forKey: .splitUnsure) ?? 0
         aiRefined = try c.decodeIfPresent(Bool.self, forKey: .aiRefined) ?? false
+        markers = try c.decodeIfPresent([Marker].self, forKey: .markers) ?? []
+        starSnippets = try c.decodeIfPresent([String].self, forKey: .starSnippets) ?? []
     }
 }
 
@@ -101,7 +107,7 @@ final class Store: ObservableObject {
         set { defaults.set(newValue, forKey: "useICloud"); objectWillChange.send(); Task { await syncAll() } }
     }
     var lastKind: String {
-        get { defaults.string(forKey: "lastKind") ?? "수업" }
+        get { Features.counseling ? (defaults.string(forKey: "lastKind") ?? "수업") : "수업" }
         set { defaults.set(newValue, forKey: "lastKind") }
     }
     /// 컴퓨터로 보낸 기록을 휴대폰에서 지울 시점(일). 0 = 지우지 않음(기본 — 학기말까지 보관)
@@ -194,11 +200,12 @@ final class Store: ObservableObject {
 
     /// 녹음을 바로 저장 (묻지 않음). 유형은 지난번과 같게 — 저장 후 카드에서 바꿀 수 있다.
     @discardableResult
-    func addAudio(tempFile: URL, duration: Double, at date: Date) -> Entry {
+    func addAudio(tempFile: URL, duration: Double, at date: Date, markers: [Marker] = []) -> Entry {
         let kind = lastKind
         let fileName = uniqueFile(baseName(date: date, kind: kind, memo: ""), "m4a")
         try? FileManager.default.moveItem(at: tempFile, to: Store.folder.appendingPathComponent(fileName))
         var e = Entry(type: "audio", fileName: fileName, createdAt: date, duration: duration, kind: kind)
+        e.markers = markers
         if transcribeOnPhone { e.stt = .working }
         let saved = newEntry(e)
         if transcribeOnPhone { transcribe(saved) }
@@ -218,18 +225,45 @@ final class Store: ObservableObject {
             let outcome = await Transcriber.transcribe(url(cur), hints: DataStore.shared.rosterNames)
             guard var now = items.first(where: { $0.id == e.id }) else { return }
             switch outcome {
-            case .text(let t):
+            case .text(let t, let segs):
                 now.transcript = t.trimmingCharacters(in: .whitespacesAndNewlines)
                 now.stt = .done
+                now.starSnippets = Store.snippets(t, segs, now.markers.filter(\.star))
                 if !now.transcript.isEmpty && !now.sent { _ = await Transcriber.embed(now.transcript, into: url(now)) }
                 update(now)
-                if !now.transcript.isEmpty { splitToStudents(now, text: now.transcript) }
+                if !now.transcript.isEmpty {
+                    if now.markers.contains(where: { $0.student != nil }) && DataStore.shared.hasRoster {
+                        // 녹음 중 이름표를 눌렀으면 그 표시대로 나눈다
+                        let r = DataStore.shared.splitByMarkers(text: t, segs: segs, markers: now.markers, date: now.createdAt,
+                                                                kind: now.kind, source: now.fileName, hint: now.memo)
+                        now.splitNames = r.names; now.splitLeftover = r.leftover; now.splitUnsure = r.unsure
+                        update(now)
+                    } else {
+                        splitToStudents(now, text: now.transcript)
+                    }
+                }
                 now = items.first(where: { $0.id == e.id }) ?? now
             case .unavailable(let m): now.stt = .unavailable; now.sttNote = m
             case .failed(let m): now.stt = .failed; now.sttNote = m
             }
             update(now)
             scheduleSync()
+        }
+    }
+
+    /// ⭐ 누른 시각이 든 문장 (앞 문장까지 함께)
+    static func snippets(_ text: String, _ segs: [Transcriber.Seg], _ stars: [Marker]) -> [String] {
+        guard !stars.isEmpty, !text.isEmpty else { return [] }
+        let ns = text as NSString
+        return stars.compactMap { m in
+            // 누르기 직전 말한 내용이 보통 중요하므로 2초 앞부터
+            let off = segs.last(where: { $0.t <= max(0, m.t - 2) })?.offset ?? segs.first?.offset ?? 0
+            var a = off, b = off
+            while a > 0, !".?!\n".contains(Character(UnicodeScalar(ns.character(at: a - 1)) ?? " ")) { a -= 1 }
+            while b < ns.length, !".?!\n".contains(Character(UnicodeScalar(ns.character(at: b)) ?? " ")) { b += 1 }
+            b = min(ns.length, b + 1)
+            let s = ns.substring(with: NSRange(location: a, length: max(0, b - a))).trimmingCharacters(in: .whitespacesAndNewlines)
+            return s.isEmpty ? nil : s
         }
     }
 
@@ -297,7 +331,9 @@ final class Store: ObservableObject {
         }
         if let k = kind { cur.kind = k; lastKind = k }
         if let m = memo { cur.memo = m }
-        if let t = text, !cur.isAudio { cur.text = t; try? t.data(using: .utf8)?.write(to: url(cur)) }
+        var resplit = false
+        if let t = text, !cur.isAudio, t != cur.text { cur.text = t; try? t.data(using: .utf8)?.write(to: url(cur)); resplit = true }
+        defer { if resplit, let now = items.first(where: { $0.id == e.id }) { splitToStudents(now, text: now.text, force: true) } }
         let notSent = cur.icloud != .done && cur.google != .done
         if notSent {
             let ext = cur.isAudio ? "m4a" : "txt"
