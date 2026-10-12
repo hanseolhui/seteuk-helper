@@ -105,7 +105,7 @@ enum Splitter {
                 guard !taken(start) else { continue }
                 let core = String(ns.substring(with: m.range).prefix(3))   // 조사 등 뒤는 버림
                 guard fuzzyNames[core] == nil else { continue }
-                // 성이 같고 자모 1개 차이, 또는 앞 두 글자가 같고 끝 글자만 비슷 ("한설이" ↔ "한설희")
+                // 성이 같고 자모 1개 차이, 또는 앞 두 글자가 같고 끝 글자만 비슷 ("김민쑤" ↔ "김민수", "이서윤" ↔ "이서연")
                 let near = fuzzyNames.filter { k, _ in
                     guard k.first == core.first else { return false }
                     let d = jamoDistance(k, core)
