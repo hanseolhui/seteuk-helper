@@ -138,3 +138,26 @@ Apps Script 요청은 앱이 자동 생성한 토큰으로 보호(스크립트 �
 - `127.0.0.1` 바인딩, Host 헤더 검사(DNS 리바인딩 방지), API 요청에 커스텀 헤더 요구(다른 웹사이트의 위조 요청 차단)
 - API 키는 로컬 DB에만 저장, 화면에는 일부만 표시
 - 참고: Gemini **무료 등급**은 입력 데이터가 구글 제품 개선에 쓰일 수 있음 → 결제 등록(유료 등급, 사용량 매우 적으면 월 수백 원 수준) 권장을 설명서에 명시
+
+## 8. 기기 사이 글 기록 동기화 (녹음 제외)
+
+- 위치: iCloud 쓰담 컨테이너 `Documents/동기화/<기기 id>.json` (맥 `~/Library/Mobile Documents/iCloud~kr~sseudam~app/Documents/동기화`).
+- 기기마다 **자기 파일 하나만** 쓰고, 그 기기가 아는 전체 기록(학급·학생·관찰기록·초안)을 담는다. 읽는 쪽은 모든 파일을 합쳐 기록(uid)마다 `updated_at`이 가장 큰 것을 고른다. 지운 기록은 `deleted: true`로 남긴다. 그래서 쓰기 충돌이 없다.
+- uid: 학급 `c-` + sha1(학년도|학기|학년|반|과목|유형)[:16], 학생 `s-` + sha1(학급uid|이름)[:16]. 맥과 폰에서 따로 만들어도 하나로 합쳐진다. 기록·초안은 무작위 uid.
+- 맥: `app/sync_text.py` (20초마다). DB 행에 uid 열을 더하고, 변경 감지는 `sync_state`(내용 해시)로 해서 기존 쓰기 코드는 건드리지 않았다.
+- 폰: `mobile/ios/Sseudam/SyncData.swift` (`DataStore`).
+- 녹음은 기존 경로(iCloud `Documents`, 구글 드라이브, AirDrop)로 따로 간다. 폰이 받아쓴 글은 m4a의 가사(©lyr) 메타데이터로 실어 보내고, 맥 `watcher.extract_iphone_transcript`가 읽는다.
+- 폰에서 이미 나눈 녹음(`notes.source` = 파일 이름)은 맥이 다시 나누지 않고 연결만 한다 (`pipeline.segment_after_transcript`).
+- 윈도우·안드로이드: 같은 형식을 구글 드라이브로 주고받을 예정 (미구현).
+
+## 9. AI 엔진과 요금제
+
+| 엔진 | 요금 | 하는 일 | 상태 |
+|---|---|---|---|
+| 규칙 | 무료 | 이름·학년반·한글 숫자·동명이인·자모 1개 차이 이름으로 나누기 | 맥·폰 |
+| 기기 안 AI (Foundation Models) | 무료 | 이름 없는 문장의 주인 정하기 (그 녹음에 나온 학생 중에서만) | 폰 (iOS 26+, 애플 인텔리전스) |
+| 내 API 키 (BYOK) | 1회 결제 예정 | 학생 요약·초안 | 맥은 Gemini 키 사용 가능 / 폰은 구조만 (`OwnKeyEngine.enabled = false`) |
+| 쓰담 플러스 | 구독 | 서버 받아쓰기·요약·초안·암호화 동기화 | 구조만 (`PlusEngine.enabled = false`) |
+
+- 폰 화면은 `AIRouter.engine(for:)`만 부른다. 플러스 → 내 키 → 기기 안 AI 순으로 쓸 수 있는 엔진을 고르고, 없으면 그 기능을 숨긴다 (`mobile/ios/Sseudam/AIEngine.swift`).
+- 밖으로 나가는 엔진(내 키·플러스)에는 학생 이름을 'OO'로 가려서 보낸다. 서버는 결과를 보관하지 않고, 사용자별·하루 상한을 둔다 (`수익모델_시뮬레이션.md` 참고).
