@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
 
     // MARK: 시작
     func applicationDidFinishLaunching(_ note: Notification) {
+        if MoveToApplications.offerIfNeeded() { return }
         buildMenu()
         buildWindow()
         showLoading("시작하는 중…")
@@ -307,6 +308,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKUIDelegate, WKNaviga
         if item.action == #selector(toggleLogin(_:)), #available(macOS 13.0, *) {
             item.state = SMAppService.mainApp.status == .enabled ? .on : .off
         }
+        return true
+    }
+}
+
+/// 다운로드 폴더나 DMG에서 바로 실행하면 macOS가 읽기 전용 임시 위치(App Translocation)에서 실행해서
+/// 자동 업데이트·전체 디스크 접근 권한 추가가 꼬인다 → 처음에 응용 프로그램 폴더로 옮기기를 권함 (톡톡과 같은 방식)
+enum MoveToApplications {
+    private static let declinedKey = "moveToApplicationsDeclined"
+
+    static var needsMove: Bool {
+        let path = Bundle.main.bundlePath
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first?.path ?? "~/Downloads"
+        return path.contains("/AppTranslocation/") || path.hasPrefix(downloads + "/") || path.hasPrefix("/Volumes/")
+            || path.hasPrefix(NSHomeDirectory() + "/Desktop/")
+    }
+
+    /// 옮기기로 해서 곧 다시 실행되면 true (이번 실행은 여기서 끝)
+    @discardableResult
+    static func offerIfNeeded() -> Bool {
+        guard needsMove, !UserDefaults.standard.bool(forKey: declinedKey) else { return false }
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.messageText = "쓰담을 응용 프로그램 폴더로 옮길까요?"
+        a.informativeText = "지금 위치(다운로드·설치 디스크)에서 바로 실행하면 자동 업데이트와 권한 설정이 제대로 되지 않아요. 옮긴 뒤 바로 다시 켜지고, 학생 기록은 그대로예요."
+        a.addButton(withTitle: "옮기기")
+        a.addButton(withTitle: "그대로 쓰기")
+        guard a.runModal() == .alertFirstButtonReturn else {
+            UserDefaults.standard.set(true, forKey: declinedKey)
+            return false
+        }
+        let apps = "/Applications"
+        let dest = apps + "/쓰담.app"
+        guard FileManager.default.isWritableFile(atPath: apps) else {
+            let e = NSAlert()
+            e.messageText = "응용 프로그램 폴더에 쓸 권한이 없어요"
+            e.informativeText = "Finder에서 쓰담을 응용 프로그램 폴더로 직접 끌어다 놓아 주세요."
+            e.runModal()
+            NSWorkspace.shared.open(URL(fileURLWithPath: apps))
+            return false
+        }
+        let src = Bundle.main.bundlePath
+        // 다운로드 폴더에 원본이 보이면 옮긴 뒤 휴지통으로 (DMG·임시 위치는 그대로 둠)
+        let original = (src.contains("/AppTranslocation/") || src.hasPrefix("/Volumes/")) ? "" : src
+        let script = """
+        while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done
+        rm -rf "$2.new"
+        if /usr/bin/ditto "$1" "$2.new"; then
+          rm -rf "$2.old"; [ -d "$2" ] && mv "$2" "$2.old"
+          if mv "$2.new" "$2"; then rm -rf "$2.old"; [ -n "$3" ] && mv "$3" ~/.Trash/ 2>/dev/null
+          else [ -d "$2.old" ] && mv "$2.old" "$2"; fi
+          [ -d /Applications/세특도우미.app ] && mv /Applications/세특도우미.app ~/.Trash/ 2>/dev/null
+        fi
+        /usr/bin/xattr -dr com.apple.quarantine "$2" 2>/dev/null
+        /usr/bin/open "$2"
+        """
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", script, "sseudam-move", src, dest, original]
+        do { try p.run() } catch { return false }
+        NSApp.terminate(nil)
         return true
     }
 }

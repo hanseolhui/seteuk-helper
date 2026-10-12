@@ -20,4 +20,29 @@ if [ -n "$NOTES" ]; then N=(--notes "$NOTES"); else N=(--generate-notes); fi
 ASSETS=(dist/Sseudam.dmg dist/Sseudam-mac.zip dist/Sseudam-Setup.exe dist/Sseudam-Android.apk dist/seteuk-app.zip dist/whisper-cli-arm64.zip)
 [ -f dist/iPhone-Shortcuts.zip ] && ASSETS+=(dist/iPhone-Shortcuts.zip)
 gh release create "v$V" "${ASSETS[@]}" --title "쓰담 $V" "${N[@]}"
+# Homebrew 탭(hanseolhui/tap)도 새 버전으로 — brew install --cask hanseolhui/tap/sseudam
+TAP="$HOME/Desktop/Projects/homebrew-tap"
+if [ -d "$TAP/.git" ]; then
+  SHA=$(shasum -a 256 dist/Sseudam-mac.zip | cut -d' ' -f1)
+  cat > "$TAP/Casks/sseudam.rb" <<CASK
+cask "sseudam" do
+  version "$V"
+  sha256 "$SHA"
+
+  url "https://github.com/hanseolhui/sseudam/releases/download/v#{version}/Sseudam-mac.zip"
+  name "쓰담"
+  name "Sseudam"
+  desc "Teacher voice notes: record, split by student, and draft school records"
+  homepage "https://hanseolhui.github.io/sseudam/"
+
+  depends_on macos: :monterey
+
+  app "쓰담.app"
+
+  uninstall quit: "kr.sseudam.desktop"
+  # 학생 기록(~/Library/Application Support/쓰담)은 지우지 않음
+end
+CASK
+  (cd "$TAP" && git add Casks/sseudam.rb && git commit -qm "sseudam $V" && git push -q) && echo "Homebrew 탭 갱신: $V"
+fi
 echo "배포 완료: v$V"
