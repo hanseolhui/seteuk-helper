@@ -1211,6 +1211,12 @@ async function renderSources() {
     </div>
 ` : '<p class="muted small">아이폰 음성메모·메모 앱 자동 가져오기는 맥에서만 됩니다. 윈도우에서는 휴대폰 \'쓰담\' 앱(아래)이나 iCloud 폴더를 쓰세요.</p>') + `
     <div class="source">
+      <div class="source-head"><h3>AirDrop · 퀵 셰어로 받기 <span class="badge blue">맥·윈도우</span> ${src.downloads.enabled ? '<span class="badge green">작동 중</span>' : ''}</h3>
+        <label class="switch"><input type="checkbox" id="dl-on" ${src.downloads.enabled ? 'checked' : ''}> 사용</label></div>
+      <p>휴대폰 쓰담 앱에서 <b>보내기 → AirDrop</b>(맥)이나 <b>퀵 셰어</b>(갤럭시 → 윈도우)로 보내면 <b>다운로드</b> 폴더에 들어온 <b>‘쓰담 …’ 파일</b>을 자동으로 가져옵니다. 맥에서는 AirDrop으로 받은 음성메모도 가져와요.
+        다운로드 폴더의 다른 파일은 건드리지 않고, 원본은 그대로 남겨 둡니다. <span class="muted small">(지금까지 ${src.downloads.count}개)</span></p>
+    </div>
+    <div class="source">
       <div class="source-head"><h3>③ iCloud '쓰담 녹음' 폴더 / 단축어 ${src.inbox.exists ? '<span class="badge green">작동 중</span>' : ''}</h3>
         <button class="sm" id="inbox-open">${src.inbox.exists ? 'Finder에서 열기' : '폴더 만들기'}</button></div>
       <p>이 폴더에 들어온 오디오·텍스트(.txt)를 자동으로 가져옵니다. 아이폰 <b>단축어</b>로 '한 번 눌러 녹음 → 자동 저장' 버튼을 만들 때 사용합니다 (사용설명서 참고).</p>
@@ -1221,6 +1227,7 @@ async function renderSources() {
     if ($('#vm-on').checked && r.access === 'no_permission') toast('전체 디스크 접근 권한이 필요합니다. 안내를 따라 주세요.', true);
     renderSources();
   };
+  $('#dl-on').onchange = async e => { await api('/api/settings', { downloads_import: e.target.checked ? '1' : '0', downloads_since: '' }); renderSources(); };
   if (!mac) { $('#inbox-open').onclick = async () => { await api('/api/inbox/create', {}); renderSources(); }; return; }
   $('#vm-on').onchange = () => setVM();
   if ($('#vm-perm')) $('#vm-perm').onclick = () => api('/api/open_privacy', { pane: 'fda' });

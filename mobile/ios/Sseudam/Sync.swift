@@ -34,13 +34,14 @@ enum Sync {
     }
 
     /// 선생님 본인의 구글 Apps Script(쓰담이 만든 것)로 업로드 → 드라이브 '쓰담 녹음함'
-    static func uploadToGoogle(file: URL, recording r: Recording, url: String, token: String) async throws {
+    static func uploadToGoogle(file: URL, entry r: Entry, url: String, token: String) async throws {
         guard let endpoint = URL(string: url) else { throw SyncError.server("연결 주소가 올바르지 않습니다.") }
         let data = try Data(contentsOf: file)
         let device = await MainActor.run { UIDevice.current.model }
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
         let body: [String: Any] = [
-            "action": "upload_recording", "token": token, "filename": file.lastPathComponent, "mime": "audio/mp4",
+            "action": "upload_recording", "token": token, "filename": file.lastPathComponent,
+            "mime": r.isAudio ? "audio/mp4" : "text/plain",
             "data": data.base64EncodedString(), "recorded_at": f.string(from: r.createdAt), "kind": r.kind,
             "title": file.deletingPathExtension().lastPathComponent, "memo": r.memo, "device": device,
         ]

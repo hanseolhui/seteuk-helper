@@ -898,6 +898,7 @@ def sources_status(h, q, b):
                       "since": s["voicememo_since"], "keyword": s["voicememo_keyword"],
                       "count": counts.get("voicememo", 0)},
         "notes": {"enabled": s["notes_enabled"] == "1", "folder": s["notes_folder"], "count": counts.get("notes", 0)},
+        "downloads": {"enabled": s["downloads_import"] == "1", "count": counts.get("downloads", 0)},
         "status": watcher.status(),
         "app_name": "쓰담" if os.environ.get("SETEUK_APP") else "터미널",
     }

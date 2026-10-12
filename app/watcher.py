@@ -35,7 +35,7 @@ SHORTCUTS_DIRS = ["~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Do
                   "~/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/세특녹음"]
 # 아이폰 '쓰담' 앱이 iCloud에 저장하는 곳 (같은 Apple ID면 자동 동기화)
 RECORDER_CONTAINERS = ["iCloud~kr~sseudam~app", "iCloud~kr~seteuk~recorder"]
-_status = {"inbox": "", "voicememo": "", "notes": ""}
+_status = {"inbox": "", "voicememo": "", "notes": "", "downloads": ""}
 _seen_sizes = {}
 _scan_lock = threading.Lock()
 
@@ -224,6 +224,68 @@ def _scan_folder(folder):
         except Exception as e:  # noqa
             print("수신 폴더 가져오기 실패:", name, e)
         _seen_sizes.pop(path, None)
+    return imported
+
+
+# ───────────────────────── 1-1. 다운로드 폴더 (AirDrop · 퀵 셰어) ─────────────────────────
+
+def _airdropped(path):
+    """맥: AirDrop으로 받은 파일은 격리 속성에 'sharingd'가 붙는다."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        r = subprocess.run(["xattr", "-p", "com.apple.quarantine", path], capture_output=True, text=True, timeout=5)
+        return "sharingd" in r.stdout
+    except Exception:  # noqa
+        return False
+
+
+def scan_downloads():
+    """다운로드 폴더에서 '쓰담 '으로 시작하는 파일(휴대폰 앱에서 AirDrop·퀵 셰어로 보낸 것)과
+    맥에서 AirDrop으로 받은 녹음을 가져온다. 원본은 그대로 두고 복사만 한다.
+    기능을 켠 뒤에 들어온 파일만 대상 (예전 다운로드를 쓸어 오지 않게)."""
+    import platform_util
+    settings = db.get_settings()
+    if settings.get("downloads_import") != "1":
+        _status["downloads"] = "꺼짐"
+        return 0
+    since = settings.get("downloads_since") or ""
+    if not since:
+        db.set_settings({"downloads_since": str(time.time())})
+        _status["downloads"] = "정상"
+        return 0
+    since_ts = float(since)
+    folder = platform_util.downloads_dir()
+    imported = 0
+    conn = db.connect()
+    try:
+        for name in os.listdir(folder):
+            path = os.path.join(folder, name)
+            ext = os.path.splitext(name)[1].lower()
+            if name.startswith(".") or not os.path.isfile(path) or ext not in AUDIO_EXTS | TEXT_EXTS:
+                continue
+            st = os.stat(path)
+            if max(st.st_mtime, getattr(st, "st_birthtime", 0)) < since_ts:
+                continue
+            ours = name.startswith("쓰담 ") or name.startswith("쓰담_")
+            if not ours and not (ext in AUDIO_EXTS and _airdropped(path)):
+                continue
+            key = "%s|%d|%d" % (name, st.st_size, int(st.st_mtime))
+            if _imported(conn, "downloads", key):
+                continue
+            if _seen_sizes.get(path) != st.st_size:  # 받는 중이면 크기가 안정될 때까지 대기
+                _seen_sizes[path] = st.st_size
+                continue
+            try:
+                import_file(path, copy=True)
+                _mark("downloads", key, "ok")
+                imported += 1
+            except Exception as e:  # noqa
+                print("다운로드 폴더 가져오기 실패:", name, e)
+            _seen_sizes.pop(path, None)
+    finally:
+        conn.close()
+    _status["downloads"] = "정상"
     return imported
 
 
@@ -432,8 +494,8 @@ def notes_running():
 
 def scan_all(force_notes=False):
     with _scan_lock:
-        out = {"inbox": 0, "voicememo": 0, "notes": 0, "errors": []}
-        for key, fn in (("inbox", scan_inbox), ("voicememo", scan_voicememos)):
+        out = {"inbox": 0, "voicememo": 0, "notes": 0, "downloads": 0, "errors": []}
+        for key, fn in (("inbox", scan_inbox), ("voicememo", scan_voicememos), ("downloads", scan_downloads)):
             try:
                 out[key] = fn()
             except Exception as e:  # noqa
@@ -449,8 +511,9 @@ def scan_all(force_notes=False):
 def scan_once():
     """(이전 버전 호환) 녹음함의 '가져오기' 버튼."""
     r = scan_all(force_notes=db.get_settings().get("notes_enabled") == "1")
-    total = r["inbox"] + r["voicememo"] + r["notes"]
-    msg = "새 기록 %d개 가져옴 (수신폴더 %d · 음성메모 %d · 메모 %d)" % (total, r["inbox"], r["voicememo"], r["notes"])
+    total = r["inbox"] + r["voicememo"] + r["notes"] + r["downloads"]
+    msg = "새 기록 %d개 가져옴 (iCloud·폴더 %d · 음성메모 %d · 메모 %d · AirDrop/다운로드 %d)" % (
+        total, r["inbox"], r["voicememo"], r["notes"], r["downloads"])
     if r["errors"]:
         msg += " / " + " / ".join(r["errors"])
     return {"ok": True, "imported": total, "message": msg, **r}

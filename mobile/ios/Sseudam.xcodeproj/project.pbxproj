@@ -7,27 +7,31 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		2DA379C59A3C1DEF6EC0942B /* RecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2742048603C9FD055C024AE /* RecordView.swift */; };
+		3461824010FB4D253F770882 /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE147E1357C039411699FAD9 /* ConnectView.swift */; };
+		3CCC1D476D7F96DEB290DD9E /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD0D2D816588F4CF251ACAC /* HomeView.swift */; };
 		52261A6115B359EC32412053 /* Recorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F955F5BA710F49B8D0B2DCF0 /* Recorder.swift */; };
-		5295B4D6ADFEBA3444943E98 /* ListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558E3FAC526A71A820A2A229 /* ListView.swift */; };
 		64EC77FCADC55903F401479E /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A6FF75DAAEF58C8169B93BA /* Store.swift */; };
+		A0DBD6B3B9C43ED9F8A39AAF /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81BF9F702054C7D3E05CD87F /* OnboardingView.swift */; };
 		A25527A0C1C17C7A079951CC /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71366FB65970277E46A7A98E /* App.swift */; };
 		A280D61CF927D06ACA06062E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AEA1284C4F15C899D71C7C32 /* Assets.xcassets */; };
+		B0708AF70260D3F3D0F6CBAC /* RecordsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2BAE67B406D313F4E1BFD09 /* RecordsView.swift */; };
 		D0202EB2EF401B5854A64FAF /* Sync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AFF827D0C38F5B88128BEAA /* Sync.swift */; };
-		E058C5D0AC2F7F74CB1CB4CA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B686D8EC5071DAB7BFCD1E9B /* SettingsView.swift */; };
+		E25827922962BBE4A760772B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F38DCE2471C61BA059A9FE94 /* Theme.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		3A6FF75DAAEF58C8169B93BA /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
-		558E3FAC526A71A820A2A229 /* ListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListView.swift; sourceTree = "<group>"; };
 		5AFF827D0C38F5B88128BEAA /* Sync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sync.swift; sourceTree = "<group>"; };
 		605EF2F258552343BF899203 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		71366FB65970277E46A7A98E /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
 		78BA9E4FC47FF7355E65007B /* Sseudam.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Sseudam.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A2742048603C9FD055C024AE /* RecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordView.swift; sourceTree = "<group>"; };
+		81BF9F702054C7D3E05CD87F /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		9BD0D2D816588F4CF251ACAC /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		AEA1284C4F15C899D71C7C32 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		B686D8EC5071DAB7BFCD1E9B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		C2BAE67B406D313F4E1BFD09 /* RecordsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordsView.swift; sourceTree = "<group>"; };
+		CE147E1357C039411699FAD9 /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
 		EBF057AE1C9754955DF8AE06 /* Sseudam.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Sseudam.entitlements; sourceTree = "<group>"; };
+		F38DCE2471C61BA059A9FE94 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		F955F5BA710F49B8D0B2DCF0 /* Recorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Recorder.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -53,14 +57,16 @@
 			children = (
 				71366FB65970277E46A7A98E /* App.swift */,
 				AEA1284C4F15C899D71C7C32 /* Assets.xcassets */,
+				CE147E1357C039411699FAD9 /* ConnectView.swift */,
+				9BD0D2D816588F4CF251ACAC /* HomeView.swift */,
 				605EF2F258552343BF899203 /* Info.plist */,
-				558E3FAC526A71A820A2A229 /* ListView.swift */,
+				81BF9F702054C7D3E05CD87F /* OnboardingView.swift */,
 				F955F5BA710F49B8D0B2DCF0 /* Recorder.swift */,
-				A2742048603C9FD055C024AE /* RecordView.swift */,
-				B686D8EC5071DAB7BFCD1E9B /* SettingsView.swift */,
+				C2BAE67B406D313F4E1BFD09 /* RecordsView.swift */,
 				EBF057AE1C9754955DF8AE06 /* Sseudam.entitlements */,
 				3A6FF75DAAEF58C8169B93BA /* Store.swift */,
 				5AFF827D0C38F5B88128BEAA /* Sync.swift */,
+				F38DCE2471C61BA059A9FE94 /* Theme.swift */,
 			);
 			path = Sseudam;
 			sourceTree = "<group>";
@@ -137,12 +143,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				A25527A0C1C17C7A079951CC /* App.swift in Sources */,
-				5295B4D6ADFEBA3444943E98 /* ListView.swift in Sources */,
-				2DA379C59A3C1DEF6EC0942B /* RecordView.swift in Sources */,
+				3461824010FB4D253F770882 /* ConnectView.swift in Sources */,
+				3CCC1D476D7F96DEB290DD9E /* HomeView.swift in Sources */,
+				A0DBD6B3B9C43ED9F8A39AAF /* OnboardingView.swift in Sources */,
 				52261A6115B359EC32412053 /* Recorder.swift in Sources */,
-				E058C5D0AC2F7F74CB1CB4CA /* SettingsView.swift in Sources */,
+				B0708AF70260D3F3D0F6CBAC /* RecordsView.swift in Sources */,
 				64EC77FCADC55903F401479E /* Store.swift in Sources */,
 				D0202EB2EF401B5854A64FAF /* Sync.swift in Sources */,
+				E25827922962BBE4A760772B /* Theme.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

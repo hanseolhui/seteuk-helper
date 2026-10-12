@@ -57,6 +57,9 @@ DEFAULT_SETTINGS = {
     # 기재 영역별 NEIS 바이트 한도 (학교 기재요령에 맞게 조정)
     "area_limits": "",
     "onboarded": "0",
+    # 다운로드 폴더(AirDrop·퀵 셰어)로 받은 '쓰담 …' 파일·AirDrop 녹음 자동 가져오기
+    "downloads_import": "1",
+    "downloads_since": "",
     "teacher_name": "",
 }
 

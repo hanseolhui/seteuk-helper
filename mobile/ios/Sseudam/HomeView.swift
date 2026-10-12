@@ -1,0 +1,296 @@
+import SwiftUI
+
+/// 담기 화면: 큰 녹음 버튼 하나 + 한 줄 메모. 묻지 않고 바로 저장하고, 필요하면 저장 카드에서 고친다.
+struct HomeView: View {
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var nav: Nav
+    @StateObject private var rec = Recorder()
+    @State private var memoText = ""
+    @State private var memoKind = Store.shared.lastKind
+    @State private var showTips = false
+    @FocusState private var memoFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 18) {
+                    header
+                    recordCard
+                    if let id = store.justSaved, let e = store.items.first(where: { $0.id == id }), !rec.isRecording {
+                        SavedCard(entry: e) { withAnimation { store.justSaved = nil } }
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                    memoCard
+                    howCard
+                }
+                .padding(.horizontal, 18).padding(.bottom, 30)
+                .frame(maxWidth: 640)
+                .frame(maxWidth: .infinity)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .softBackground()
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { showTips = true } label: { Image(systemName: "questionmark.circle.fill").font(.title3) }
+                        .accessibilityLabel("사용 방법")
+                }
+            }
+            .sheet(isPresented: $showTips) { TipsView() }
+            .alert("마이크 권한이 필요해요", isPresented: $rec.permissionDenied) {
+                Button("설정 열기") { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
+                Button("닫기", role: .cancel) {}
+            } message: { Text("설정 → 쓰담 → 마이크를 켜 주세요.") }
+            .onChange(of: nav.startRecordingRequest) { _ in
+                if !rec.isRecording { Task { await rec.start() } }
+            }
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: store.justSaved)
+        }
+    }
+
+    // MARK: 머리말
+    var header: some View {
+        HStack(spacing: 14) {
+            Dami(size: 58, mood: rec.isRecording ? .listening : .happy)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(greeting).font(Theme.font(22, .bold))
+                HStack(spacing: 6) {
+                    if store.autoSend {
+                        Pill(text: "컴퓨터로 자동 전송", icon: "checkmark.circle.fill", color: Theme.mint)
+                    } else {
+                        Button { nav.tab = .connect } label: {
+                            Pill(text: "컴퓨터와 연결하기", icon: "link", color: Theme.coral)
+                        }
+                    }
+                    if store.todayCount > 0 {
+                        Pill(text: "오늘 \(store.todayCount)개", icon: "sparkles", color: Theme.lavender)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 6)
+    }
+
+    var greeting: String {
+        if rec.isRecording { return "잘 듣고 있어요" }
+        let h = Calendar.current.component(.hour, from: Date())
+        if h < 12 { return "좋은 아침이에요!" }
+        if h < 17 { return "오늘 수업, 한마디 남겨요" }
+        return "오늘도 수고하셨어요"
+    }
+
+    // MARK: 녹음
+    var recordCard: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                if rec.isRecording && !rec.isPaused {
+                    PulseRings(color: Theme.coral, level: CGFloat(rec.level))
+                }
+                Button(action: toggle) {
+                    ZStack {
+                        Circle().fill(rec.isRecording ? Theme.warm : Theme.brand)
+                            .frame(width: 148, height: 148)
+                            .shadow(color: (rec.isRecording ? Theme.coral : Theme.blue).opacity(0.4), radius: 18, y: 8)
+                        Image(systemName: rec.isRecording ? "stop.fill" : "mic.fill")
+                            .font(.system(size: 52, weight: .semibold)).foregroundStyle(.white)
+                    }
+                }
+                .buttonStyle(Squishy())
+                .accessibilityLabel(rec.isRecording ? "녹음 끝내기" : "녹음 시작")
+            }
+            .frame(height: 200)
+
+            Text(rec.isRecording ? timeString(rec.elapsed) : "눌러서 말하기")
+                .font(Theme.font(rec.isRecording ? 40 : 20, rec.isRecording ? .light : .semibold))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+
+            Text(statusText).font(Theme.font(14)).foregroundStyle(Theme.soft).multilineTextAlignment(.center)
+
+            if rec.isRecording {
+                HStack(spacing: 10) {
+                    Button { rec.togglePause() } label: {
+                        Label(rec.isPaused ? "이어서" : "잠깐 멈춤", systemImage: rec.isPaused ? "play.fill" : "pause.fill")
+                            .font(Theme.font(15, .semibold)).padding(.horizontal, 18).padding(.vertical, 10)
+                            .background(Theme.blue.opacity(0.12), in: Capsule())
+                    }
+                    Button(role: .destructive) { rec.discard() } label: {
+                        Label("버리기", systemImage: "xmark").font(Theme.font(15, .semibold))
+                            .padding(.horizontal, 18).padding(.vertical, 10)
+                            .background(Theme.coral.opacity(0.12), in: Capsule())
+                    }.foregroundStyle(Theme.coral)
+                }
+                .buttonStyle(Squishy())
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .card(padding: 22)
+    }
+
+    var statusText: String {
+        if !rec.isRecording { return "학년·반·이름을 먼저 말하면 학생별로 쏙 정리돼요\n예) 2학년 3반 김민수, 토론에서 근거를 들어 반론을 폈음" }
+        return rec.isPaused ? "잠깐 멈췄어요" : "화면을 꺼도 계속 녹음돼요 · 끝나면 한 번 더 누르세요"
+    }
+
+    func toggle() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        if rec.isRecording {
+            if let r = rec.stop() {
+                if r.1 < 1 { try? FileManager.default.removeItem(at: r.0) }
+                else {
+                    store.addAudio(tempFile: r.0, duration: r.1, at: r.2)
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                }
+            }
+        } else {
+            memoFocused = false
+            Task { await rec.start() }
+        }
+    }
+
+    // MARK: 한 줄 메모
+    var memoCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("한 줄로 남기기", systemImage: "pencil.line").font(Theme.font(17, .bold))
+                Spacer()
+                KindPicker(kind: $memoKind)
+            }
+            TextField("예) 2학년 3반 김민수 발표에서 근거를 세 가지 제시함", text: $memoText, axis: .vertical)
+                .font(Theme.font(16))
+                .lineLimit(2...5)
+                .focused($memoFocused)
+                .padding(12)
+                .background(Theme.bg, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            HStack {
+                Text("키보드의 🎤로 말해도 돼요").font(Theme.font(12)).foregroundStyle(Theme.soft)
+                Spacer()
+                Button {
+                    if store.addText(memoText, kind: memoKind) != nil {
+                        memoText = ""; memoFocused = false
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    }
+                } label: {
+                    Label("담기", systemImage: "arrow.down.circle.fill").font(Theme.font(15, .bold))
+                        .padding(.horizontal, 16).padding(.vertical, 9)
+                        .background(memoText.trimmingCharacters(in: .whitespaces).isEmpty ? Color.gray.opacity(0.25) : Theme.blue, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(Squishy())
+                .disabled(memoText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .card()
+    }
+
+    // MARK: 흐름 안내
+    var howCard: some View {
+        HStack(spacing: 0) {
+            step("mic.fill", "말하기", Theme.blue)
+            arrow
+            step("icloud.and.arrow.up.fill", "자동 전송", Theme.lavender)
+            arrow
+            step("person.2.fill", "학생별 정리", Theme.mint)
+            arrow
+            step("doc.text.fill", "초안", Theme.coral)
+        }
+        .frame(maxWidth: .infinity)
+        .card(padding: 14)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("말하면 컴퓨터로 자동 전송되어 학생별로 정리되고 학기말 초안이 만들어집니다")
+    }
+
+    func step(_ icon: String, _ text: String, _ color: Color) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 18, weight: .semibold)).foregroundStyle(color)
+                .frame(width: 40, height: 40).background(color.opacity(0.14), in: Circle())
+            Text(text).font(Theme.font(11, .semibold)).foregroundStyle(Theme.soft).lineLimit(1).minimumScaleFactor(0.8)
+        }.frame(maxWidth: .infinity)
+    }
+
+    var arrow: some View {
+        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.tertiary)
+    }
+}
+
+/// 수업 / 상담 선택 알약
+struct KindPicker: View {
+    @Binding var kind: String
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(["수업", "상담"], id: \.self) { k in
+                Button { withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { kind = k } } label: {
+                    Text(k).font(Theme.font(13, .semibold))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .foregroundStyle(kind == k ? .white : Theme.soft)
+                        .background(kind == k ? (k == "상담" ? Theme.lavender : Theme.blue) : Color.clear, in: Capsule())
+                }
+            }
+        }
+        .padding(3)
+        .background(Color.gray.opacity(0.12), in: Capsule())
+    }
+}
+
+/// 방금 저장한 기록 — 유형·메모를 바로 고칠 수 있는 카드
+struct SavedCard: View {
+    @EnvironmentObject var store: Store
+    var entry: Entry
+    var onClose: () -> Void
+    @State private var memo = ""
+    @State private var kind = "수업"
+    @State private var remaining = Int(Store.grace)
+    let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.mint).font(.title3)
+                Text(entry.isAudio ? "녹음을 담았어요 · \(timeString(entry.duration))" : "메모를 담았어요")
+                    .font(Theme.font(16, .bold))
+                Spacer()
+                Button(action: onClose) { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary).font(.title3) }
+            }
+            HStack(spacing: 8) {
+                KindPicker(kind: $kind)
+                    .onChange(of: kind) { k in store.edit(entry, kind: k) }
+                if entry.isAudio {
+                    TextField("메모 (예: 2-3 국어)", text: $memo)
+                        .font(Theme.font(14)).padding(.horizontal, 10).padding(.vertical, 7)
+                        .background(Theme.bg, in: Capsule())
+                        .onSubmit { store.edit(entry, memo: memo) }
+                }
+            }
+            Text(remaining > 0 ? "\(remaining)초 뒤에 컴퓨터로 보내요 · 그 전에 고칠 수 있어요" : (store.autoSend ? "컴퓨터로 보내는 중이에요" : "‘연결’에서 컴퓨터와 연결하면 자동으로 보내져요"))
+                .font(Theme.font(12)).foregroundStyle(Theme.soft)
+        }
+        .card()
+        .onAppear { memo = entry.memo; kind = entry.kind; remaining = max(0, Int(entry.editableUntil.timeIntervalSinceNow.rounded())) }
+        .onReceive(timer) { _ in
+            remaining = max(0, Int(entry.editableUntil.timeIntervalSinceNow.rounded()))
+            if remaining == 0 && memo != entry.memo && entry.isAudio { store.edit(entry, memo: memo) }
+        }
+        .onDisappear { if entry.isAudio && memo != entry.memo { store.edit(entry, memo: memo) } }
+    }
+}
+
+/// 녹음 중 퍼지는 동그라미
+struct PulseRings: View {
+    var color: Color
+    var level: CGFloat
+    @State private var animate = false
+    var body: some View {
+        ZStack {
+            ForEach(0..<3) { i in
+                Circle().stroke(color.opacity(0.35), lineWidth: 3)
+                    .frame(width: 150, height: 150)
+                    .scaleEffect(animate ? 1.35 + level * 0.25 : 1)
+                    .opacity(animate ? 0 : 0.9)
+                    .animation(.easeOut(duration: 1.6).repeatForever(autoreverses: false).delay(Double(i) * 0.5), value: animate)
+            }
+            Circle().fill(color.opacity(0.15)).frame(width: 150 + level * 46, height: 150 + level * 46)
+                .animation(.linear(duration: 0.1), value: level)
+        }
+        .onAppear { animate = true }
+    }
+}
