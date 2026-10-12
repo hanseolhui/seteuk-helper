@@ -26,25 +26,41 @@ enum Transcriber {
     }
 
     static func transcribe(_ file: URL, hints: [String] = []) async -> Outcome {
+        // iOS 26+: 새 받아쓰기 엔진(SpeechAnalyzer). 긴 녹음·쉬는 구간에도 앞부분을 잃지 않고 훨씬 정확함
+        if #available(iOS 26.0, *), let r = await transcribeModern(file, hints: hints) { return r }
         guard await authorize() else { return .unavailable("받아쓰기 권한이 꺼져 있어요 (설정 → 쓰담)") }
         guard let r = recognizer, r.supportsOnDeviceRecognition else {
             return .unavailable("이 아이폰은 기기 안 받아쓰기를 지원하지 않아요 · 컴퓨터에서 글자로 바꿔요")
         }
         let req = SFSpeechURLRecognitionRequest(url: file)
         req.requiresOnDeviceRecognition = true
-        req.shouldReportPartialResults = false
+        // 예전 엔진은 말을 쉬면 앞부분을 버리고 새로 시작하는 일이 있어, 중간 결과를 이어 붙인다
+        req.shouldReportPartialResults = true
         req.addsPunctuation = true
         req.taskHint = .dictation
         if !hints.isEmpty { req.contextualStrings = Array(hints.prefix(100)) }
         return await withCheckedContinuation { c in
             var done = false
+            var committed = ""          // 앞에서 끊겨 버려진 부분
+            var last = ""
             var task: SFSpeechRecognitionTask?
             task = r.recognitionTask(with: req) { result, error in
                 if done { return }
+                if let result {
+                    let cur = result.bestTranscription.formattedString
+                    // 새 결과가 앞 결과를 이어 쓰지 않고 처음부터 시작하면, 앞 결과를 보관
+                    if !last.isEmpty, !cur.hasPrefix(String(last.prefix(4))), cur.count < last.count / 2 {
+                        committed += (committed.isEmpty ? "" : " ") + last
+                    }
+                    last = cur
+                }
                 if let result, result.isFinal {
                     done = true
                     let tr = result.bestTranscription
-                    c.resume(returning: .text(tr.formattedString, tr.segments.map { Seg(t: $0.timestamp, offset: $0.substringRange.location) }))
+                    let head = committed.isEmpty ? "" : committed + " "
+                    let shift = (head as NSString).length
+                    c.resume(returning: .text(head + tr.formattedString,
+                                              tr.segments.map { Seg(t: $0.timestamp, offset: shift + $0.substringRange.location) }))
                 } else if let error {
                     done = true
                     let ns = error as NSError
@@ -57,6 +73,45 @@ enum Transcriber {
                 }
             }
             _ = task
+        }
+    }
+
+    @available(iOS 26.0, *)
+    static func transcribeModern(_ file: URL, hints: [String]) async -> Outcome? {
+        let supported = await SpeechTranscriber.supportedLocales
+        guard let locale = supported.first(where: { $0.identifier(.bcp47) == "ko-KR" }) else { return nil }
+        let t = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: [.audioTimeRange])
+        do {
+            // 처음 한 번 애플 받아쓰기 모델을 내려받음 (학생 목소리는 보내지 않음)
+            if let req = try await AssetInventory.assetInstallationRequest(supporting: [t]) { try await req.downloadAndInstall() }
+            let analyzer = SpeechAnalyzer(modules: [t])
+            if !hints.isEmpty {
+                let ctx = AnalysisContext()
+                ctx.contextualStrings[.general] = Array(hints.prefix(100))
+                try await analyzer.setContext(ctx)
+            }
+            let audio = try AVAudioFile(forReading: file)
+            let collect = Task { () throws -> (String, [Seg]) in
+                var out = ""
+                var segs: [Seg] = []
+                for try await r in t.results {
+                    for run in r.text.runs {
+                        let piece = String(r.text[run.range].characters)
+                        if let tr = run.audioTimeRange { segs.append(Seg(t: tr.start.seconds, offset: (out as NSString).length)) }
+                        out += piece
+                    }
+                }
+                return (out, segs)
+            }
+            if let lastSample = try await analyzer.analyzeSequence(from: audio) {
+                try await analyzer.finalizeAndFinish(through: lastSample)
+            } else {
+                await analyzer.cancelAndFinishNow()
+            }
+            let (text, segs) = try await collect.value
+            return .text(text, segs)
+        } catch {
+            return nil
         }
     }
 

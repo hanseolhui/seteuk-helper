@@ -287,6 +287,17 @@ def auto_process(rid, force=False):
         elif ai_ready(settings):
             enqueue("transcribe", {"recording_id": rid, "chain": True}, "전사 #%d" % rid)
     elif has_text:
+        # 휴대폰 쓰담이 받아쓴 글이 실려 온 녹음: 내 맥 Whisper가 있으면 더 정확하게 다시 받아쓴다
+        # (폰에서 나눈 학생별 기록은 그대로 두고 연결만 함 — segment_after_transcript)
+        conn = db.connect()
+        rec = db.row(conn, "SELECT original_name FROM recordings WHERE id=?", (rid,))
+        conn.close()
+        from_phone = bool(rec and (rec.get("original_name") or "").startswith("쓰담 ") and r["audio_path"])
+        if from_phone and settings.get("rewhisper_phone", "1") == "1" and use_whisper(settings):
+            import whisper
+            if whisper.available():
+                enqueue("transcribe", {"recording_id": rid, "chain": True}, "내 맥에서 다시 받아쓰기 #%d" % rid)
+                return
         segment_after_transcript(rid, settings)
 
 

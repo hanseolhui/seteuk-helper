@@ -42,6 +42,8 @@ def sync_dir():
     """iCloud의 쓰담 폴더 안 '동기화'. 아이폰 앱을 한 번이라도 쓴 Apple ID여야 폴더가 있다."""
     if db.get_settings().get("text_sync", "1") != "1":
         return None
+    if os.environ.get("SETEUK_DATA") and not os.environ.get("SSEUDAM_SYNC_DIR"):
+        return None   # 테스트 데이터로 띄운 서버는 진짜 iCloud 동기화 폴더를 건드리지 않음
     base = os.environ.get("SSEUDAM_SYNC_DIR") or platform_util.icloud_container_dir(CONTAINER)
     if not os.path.isdir(base):
         return None

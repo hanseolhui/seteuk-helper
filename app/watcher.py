@@ -558,4 +558,8 @@ def _loop():
 
 
 def start():
+    # 테스트용 데이터 폴더(SETEUK_DATA)로 띄운 서버는 진짜 iCloud·다운로드·음성메모를 건드리지 않는다
+    if os.environ.get("SETEUK_DATA") and os.environ.get("SSEUDAM_REAL_INBOX") != "1":
+        print("테스트 데이터 폴더 사용 중 — 자동 가져오기를 끕니다")
+        return
     threading.Thread(target=_loop, daemon=True, name="importer").start()

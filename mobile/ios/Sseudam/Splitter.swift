@@ -105,7 +105,12 @@ enum Splitter {
                 guard !taken(start) else { continue }
                 let core = String(ns.substring(with: m.range).prefix(3))   // 조사 등 뒤는 버림
                 guard fuzzyNames[core] == nil else { continue }
-                let near = fuzzyNames.filter { $0.key.first == core.first && jamoDistance($0.key, core) == 1 }
+                // 성이 같고 자모 1개 차이, 또는 앞 두 글자가 같고 끝 글자만 비슷 ("한설이" ↔ "한설희")
+                let near = fuzzyNames.filter { k, _ in
+                    guard k.first == core.first else { return false }
+                    let d = jamoDistance(k, core)
+                    return d == 1 || (d == 2 && k.prefix(2) == core.prefix(2))
+                }
                 guard near.count == 1, let name = near.first?.key else { continue }
                 let cands = (byName[name] ?? []).sorted { rank($0) < rank($1) }
                 let ctx = contextClass(at: start)

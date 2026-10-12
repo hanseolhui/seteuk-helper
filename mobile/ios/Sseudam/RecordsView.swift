@@ -250,6 +250,7 @@ struct EntryDetail: View {
         .onAppear { kind = current.kind; memo = current.memo; text = current.text; transcript = current.transcript }
         .onChange(of: current.transcript) { t in if transcript.isEmpty { transcript = t } }
         .onDisappear {
+            player.stop()
             let tChanged = current.isAudio && transcript != current.transcript
             if !sent && (kind != current.kind || memo != current.memo || (!current.isAudio && text != current.text) || tChanged) {
                 store.edit(current, kind: kind, memo: memo, text: current.isAudio ? nil : text,
@@ -331,6 +332,8 @@ struct StarLabel: LabelStyle {
 final class Player: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var playing: UUID?
     private var p: AVAudioPlayer?
+    func stop() { p?.stop(); p = nil; playing = nil }
+
     func toggle(_ id: UUID, _ url: URL) {
         if playing == id { p?.stop(); playing = nil; return }
         try? AVAudioSession.sharedInstance().setCategory(.playback)
