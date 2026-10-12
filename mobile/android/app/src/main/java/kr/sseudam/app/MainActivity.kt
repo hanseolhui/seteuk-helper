@@ -145,7 +145,7 @@ fun RecordScreen() {
         Spacer(Modifier.weight(1f))
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFF0F2F5)).padding(14.dp)) {
             Text("💡 이렇게 말하면 학생별로 자동 정리돼요", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-            Text("“3번 김민수, 토론에서 근거를 세 가지 들어 반론을 폈음. 7번 이서연, …”", color = Color.Gray, fontSize = 13.sp)
+            Text("“2학년 3반 김민수! 친구 의견 모아 멋지게 발표 🌟 이서연은 실험 기록을 꼼꼼히 💛”", color = Color.Gray, fontSize = 13.sp)
         }
     }
 

@@ -134,7 +134,7 @@ struct HomeView: View {
     }
 
     var statusText: String {
-        if !rec.isRecording { return "학년·반·이름부터 말하면 학생별로 쏙쏙 담겨요 ✨\n“2학년 3반 김민수! 근거 세 개로 반론 척척 🙌”" }
+        if !rec.isRecording { return "학년·반·이름부터 말하면 학생별로 쏙쏙 담겨요 ✨\n“2학년 3반 김민수! 친구 의견 모아 멋지게 발표 🌟”" }
         return rec.isPaused ? "잠깐 멈췄어요" : "화면을 꺼도 계속 녹음돼요 · 끝나면 한 번 더 누르세요"
     }
 

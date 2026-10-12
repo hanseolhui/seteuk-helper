@@ -13,7 +13,7 @@ struct OnboardingView: View {
                       example: nil).tag(0)
                 slide(mood: .listening, title: "이렇게 말하면\n학생별로 정리돼요",
                       text: "학년·반·이름을 먼저 말하면 컴퓨터가\n알아서 그 학생 기록으로 넣어요.",
-                      example: "“2학년 3반 김민수!\n토론에서 근거 세 개로 반론을 척척 🙌”").tag(1)
+                      example: "“2학년 3반 김민수!\n친구 의견을 차곡차곡 모아 발표했어요 🌟”").tag(1)
                 slide(mood: .calm, title: "학기말엔\n초안까지 한 번에",
                       text: "모인 기록으로 세특·행동특성·창체 초안을\n만들고 NEIS 글자 수도 맞춰 줘요.",
                       example: nil).tag(2)
