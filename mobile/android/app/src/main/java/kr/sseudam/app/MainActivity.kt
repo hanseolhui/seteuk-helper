@@ -3,21 +3,23 @@ package kr.sseudam.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.MediaPlayer
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -25,26 +27,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-
-private val Accent = Color(0xFF2F6FDE)
+import java.util.Calendar
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,7 +48,8 @@ class MainActivity : ComponentActivity() {
         handleLink(intent)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme(primary = Accent)) { App() }
+            MaterialTheme(colorScheme = lightColorScheme(primary = T.blue, secondary = T.lavender, background = T.bg,
+                surface = T.card, surfaceContainerLow = T.card, surfaceContainer = T.card, onSurface = T.ink)) { App() }
         }
         UploadWorker.enqueue(this)
     }
@@ -66,18 +62,52 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** 탭 안에서 들어가는 화면 */
+sealed interface Route {
+    data class Cls(val uid: String) : Route
+    data class Stu(val uid: String) : Route
+    data class Draft(val classUid: String) : Route
+    data class Entry(val id: String) : Route
+}
+
+class Nav(val tab: MutableState<Int>, private val stacks: List<androidx.compose.runtime.snapshots.SnapshotStateList<Route>>) {
+    val stack get() = stacks[tab.value]
+    fun go(r: Route) { stack.add(r) }
+    fun back() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
+    fun switch(t: Int, r: Route? = null) { tab.value = t; if (r != null) { stacks[t].clear(); stacks[t].add(r) } }
+}
+
 @Composable
 fun App() {
-    var tab by remember { mutableIntStateOf(0) }
-    Scaffold(bottomBar = {
-        NavigationBar {
-            NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Filled.Mic, null) }, label = { Text("녹음") })
-            NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Filled.List, null) }, label = { Text("녹음 목록") })
-            NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Filled.Sync, null) }, label = { Text("연결") })
+    val ctx = LocalContext.current
+    val tab = remember { mutableIntStateOf(0) }
+    val stacks = remember { List(4) { mutableStateListOf<Route>() } }
+    val nav = remember { Nav(tab, stacks) }
+    LaunchedEffect(Unit) { Updater.check(ctx) }
+    BackHandler(enabled = nav.stack.isNotEmpty()) { nav.back() }
+
+    Scaffold(containerColor = T.bg, bottomBar = {
+        NavigationBar(containerColor = T.card) {
+            val items = listOf(Triple("담기", Icons.Filled.Mic, 0), Triple("기록함", Icons.Filled.Inventory2, 1),
+                Triple("학생", Icons.Filled.People, 2), Triple("연결", Icons.Filled.Sync, 3))
+            items.forEach { (label, icon, i) ->
+                NavigationBarItem(tab.intValue == i, {
+                    if (tab.intValue == i) stacks[i].clear() else tab.intValue = i
+                }, { Icon(icon, null) }, label = { Text(label) },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = T.blue, selectedTextColor = T.blue, indicatorColor = T.blue.copy(alpha = 0.12f)))
+            }
         }
     }) { pad ->
-        Box(Modifier.padding(pad).fillMaxSize()) {
-            when (tab) { 0 -> RecordScreen(); 1 -> ListScreen(); else -> ConnectScreen() }
+        Box(Modifier.padding(pad).fillMaxSize().background(T.bg)) {
+            when (val r = nav.stack.lastOrNull()) {
+                null -> when (tab.intValue) {
+                    0 -> HomeScreen(nav); 1 -> RecordsScreen(nav); 2 -> StudentsScreen(nav); else -> ConnectScreen()
+                }
+                is Route.Cls -> ClassScreen(nav, r.uid)
+                is Route.Stu -> StudentScreen(nav, r.uid)
+                is Route.Draft -> ClassDraftScreen(nav, r.classUid)
+                is Route.Entry -> EntryScreen(nav, r.id)
+            }
         }
     }
 }
@@ -87,16 +117,32 @@ fun timeString(ms: Long): String {
     return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%02d:%02d".format(s / 60, s % 60)
 }
 
+/** 화면 위쪽 뒤로 가기 줄 */
 @Composable
-fun RecordScreen() {
+fun BackBar(title: String, nav: Nav, trailing: @Composable RowScope.() -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton({ nav.back() }) { Icon(Icons.Filled.ArrowBackIosNew, "뒤로", tint = T.blue) }
+        Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = T.ink, modifier = Modifier.weight(1f), maxLines = 1)
+        trailing()
+    }
+}
+
+// ───────────────────────── 담기 ─────────────────────────
+
+@Composable
+fun HomeScreen(nav: Nav) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val recording by RecordService.recording.collectAsStateWithLifecycle()
     val paused by RecordService.paused.collectAsStateWithLifecycle()
     val level by RecordService.level.collectAsStateWithLifecycle()
     val paired by Store.paired.collectAsStateWithLifecycle()
+    val items by Store.items.collectAsStateWithLifecycle()
+    val db by DataStore.db.collectAsStateWithLifecycle()
+    val update by Updater.available.collectAsStateWithLifecycle()
     var elapsed by remember { mutableLongStateOf(0L) }
     var pending by remember { mutableStateOf<Triple<File, Long, Long>?>(null) }
-    var saved by remember { mutableStateOf(false) }
+    var savedId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(recording) { while (recording) { elapsed = RecordService.elapsedMs(); delay(100) } }
 
     val perm = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
@@ -109,6 +155,7 @@ fun RecordScreen() {
             RecordService.lastFile?.let { f -> if (dur >= 1000) pending = Triple(f, dur, at) else f.delete() }
             elapsed = 0
         } else if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            savedId = null
             RecordService.start(ctx)
         } else {
             val ps = mutableListOf(Manifest.permission.RECORD_AUDIO)
@@ -117,154 +164,181 @@ fun RecordScreen() {
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("쓰담", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Accent, modifier = Modifier.fillMaxWidth())
-        Text("말로 담고, 글로 씁니다", fontSize = 13.sp, color = Color.Gray, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.weight(1f))
-        Text(timeString(elapsed), fontSize = 60.sp, fontWeight = FontWeight.Light,
-            color = if (recording) MaterialTheme.colorScheme.onBackground else Color.Gray)
-        Spacer(Modifier.height(16.dp))
-        LinearProgressIndicator(progress = { if (recording && !paused) level else 0f }, modifier = Modifier.fillMaxWidth(0.7f).height(8.dp).clip(CircleShape))
-        Spacer(Modifier.height(12.dp))
-        Text(if (!recording) "버튼을 누르면 바로 녹음됩니다" else if (paused) "일시정지됨" else "녹음 중 · 화면을 꺼도 계속 녹음됩니다",
-            color = Color.Gray, fontSize = 14.sp)
-        Spacer(Modifier.height(24.dp))
-        FilledIconButton(onClick = ::toggle, modifier = Modifier.size(120.dp),
-            colors = IconButtonDefaults.filledIconButtonColors(containerColor = if (recording) Color(0xFFE5484D) else Accent)) {
-            Icon(if (recording) Icons.Filled.Stop else Icons.Filled.Mic, contentDescription = if (recording) "녹음 끝내기" else "녹음 시작",
-                modifier = Modifier.size(52.dp), tint = Color.White)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        // 머리말
+        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Dami(56.dp, listening = recording, happy = !recording)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(greeting(recording), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = T.ink)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (paired) Pill("✓ 컴퓨터로 자동 전송", T.mint) else Pill("🔗 컴퓨터와 연결하기", T.coral) { nav.switch(3) }
+                    val today = items.count { android.text.format.DateUtils.isToday(it.createdAt) }
+                    if (today > 0) Pill("✨ 오늘 ${today}개", T.lavender)
+                }
+            }
         }
-        if (recording) {
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(onClick = { RecordService.togglePause(ctx) }) { Text(if (paused) "이어서 녹음" else "일시정지") }
+
+        update?.let { UpdateCard(it) }
+
+        // 녹음
+        Column(Modifier.fillMaxWidth().card(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            val pulse by animateFloatAsState(if (recording && !paused) 1f + level * 0.25f else 1f, label = "pulse")
+            Box(Modifier.height(200.dp), contentAlignment = Alignment.Center) {
+                if (recording && !paused) Box(Modifier.size(150.dp).scale(pulse).clip(CircleShape).background(T.coral.copy(alpha = 0.15f)))
+                Box(Modifier.size(148.dp).clip(CircleShape).background(if (recording) T.warm else T.brand).clickable { toggle() },
+                    contentAlignment = Alignment.Center) {
+                    Icon(if (recording) Icons.Filled.Stop else Icons.Filled.Mic, if (recording) "녹음 끝내기" else "녹음 시작",
+                        tint = Color.White, modifier = Modifier.size(56.dp))
+                }
+            }
+            Text(if (recording) timeString(elapsed) else "눌러서 말하기", fontSize = if (recording) 40.sp else 20.sp,
+                fontWeight = if (recording) FontWeight.Light else FontWeight.SemiBold, color = T.ink)
+            Spacer(Modifier.height(8.dp))
+            Text(if (!recording) "학년·반·이름부터 말하면 학생별로 쏙쏙 담겨요 ✨\n“2학년 3반 김민수! 친구 의견 모아 멋지게 발표 🌟”"
+                else if (paused) "잠깐 멈췄어요" else "화면을 꺼도 계속 녹음돼요 · 끝나면 한 번 더 누르세요",
+                fontSize = 14.sp, color = T.soft, textAlign = TextAlign.Center)
+            if (recording) {
+                Spacer(Modifier.height(12.dp))
+                ChipButton(if (paused) "▶ 이어서" else "⏸ 잠깐 멈춤") { RecordService.togglePause(ctx) }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("🖥️ 녹음은 컴퓨터의 쓰담이 글자로 바꾸고 학생별로 정리해요", fontSize = 12.sp, color = T.soft, textAlign = TextAlign.Center)
         }
-        if (saved) {
-            Spacer(Modifier.height(12.dp))
-            Text(if (paired) "✓ 저장 완료 · 컴퓨터로 자동 전송됩니다" else "✓ 저장 완료 · '연결' 탭에서 컴퓨터와 연결하세요", color = Color(0xFF1F9D6B))
+
+        savedId?.let { id -> Store.get(id)?.let { SavedCard(it, db, paired, nav) { savedId = null } } }
+
+        MemoCard(recording) { r -> savedId = r.id }
+
+        // 흐름 안내
+        Row(Modifier.fillMaxWidth().card(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf("🎙️" to "말하기", "☁️" to "자동 전송", "👥" to "학생별 정리", "📝" to "초안").forEachIndexed { i, (e, t) ->
+                if (i > 0) Text("›", color = T.soft)
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(e, fontSize = 20.sp); Text(t, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = T.soft, maxLines = 1)
+                }
+            }
         }
-        Spacer(Modifier.weight(1f))
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFF0F2F5)).padding(14.dp)) {
-            Text("💡 이렇게 말하면 학생별로 자동 정리돼요", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-            Text("“2학년 3반 김민수! 친구 의견 모아 멋지게 발표 🌟 이서연은 실험 기록을 꼼꼼히 💛”", color = Color.Gray, fontSize = 13.sp)
-        }
+        Spacer(Modifier.height(20.dp))
     }
 
     pending?.let { (file, dur, at) ->
-        var kind by remember { mutableStateOf("수업") }
         var memo by remember { mutableStateOf("") }
         AlertDialog(
-            onDismissRequest = {},
-            title = { Text("녹음 저장 (${timeString(dur)})") },
+            onDismissRequest = {}, containerColor = T.card,
+            title = { Text("녹음을 담을까요? (${timeString(dur)})") },
             text = {
-                Column {
-                    Row { listOf("수업", "상담").forEach { k ->
-                        FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(k) }, modifier = Modifier.padding(end = 8.dp))
-                    } }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(memo, { memo = it }, label = { Text("메모 (선택) 예: 2-3 국어") }, singleLine = true)
-                    Text("학급은 컴퓨터의 시간표나 녹음 내용으로 자동 지정됩니다.", fontSize = 12.sp, color = Color.Gray)
+                    Text("반은 컴퓨터의 시간표나 녹음 내용으로 자동으로 정해져요.", fontSize = 12.sp, color = T.soft)
                 }
             },
-            confirmButton = { TextButton({ Store.add(file, dur / 1000.0, kind, memo, at); pending = null; saved = true }) { Text("저장") } },
-            dismissButton = { TextButton({ file.delete(); pending = null }) { Text("버리기", color = Color(0xFFE5484D)) } },
+            // 상담 유형은 아이폰과 같이 지금은 숨김 (수업 기록 위주)
+            confirmButton = { TextButton({ Store.add(file, dur / 1000.0, "수업", memo, at); pending = null
+                savedId = Store.items.value.firstOrNull()?.id }) { Text("담기") } },
+            dismissButton = { TextButton({ file.delete(); pending = null }) { Text("버리기", color = T.coral) } },
         )
     }
 }
 
-@Composable
-fun ListScreen() {
-    val items by Store.items.collectAsStateWithLifecycle()
-    var playing by remember { mutableStateOf<String?>(null) }
-    val player = remember { MediaPlayer() }
-    DisposableEffect(Unit) { onDispose { player.release() } }
-    val df = remember { SimpleDateFormat("M월 d일 (E) HH:mm", Locale.KOREA) }
-    var confirmDelete by remember { mutableStateOf<Recording?>(null) }
-
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Text("녹음 목록", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 16.dp))
-        if (items.isEmpty()) {
-            Text("아직 녹음이 없습니다. 녹음 탭에서 녹음하면 여기에 쌓이고, 컴퓨터로 자동 전송됩니다.", color = Color.Gray)
-        }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(items, key = { it.id }) { r ->
-                Card { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton({
-                        if (playing == r.id) { player.reset(); playing = null } else {
-                            player.reset(); player.setDataSource(Store.file(r).absolutePath); player.prepare(); player.start()
-                            player.setOnCompletionListener { playing = null }; playing = r.id
-                        }
-                    }) { Icon(if (playing == r.id) Icons.Filled.StopCircle else Icons.Filled.PlayCircle, null, tint = Accent, modifier = Modifier.size(36.dp)) }
-                    Column(Modifier.weight(1f)) {
-                        Text(df.format(Date(r.createdAt)), fontWeight = FontWeight.Medium)
-                        Text("${r.kind} · ${timeString((r.durationSec * 1000).toLong())}${if (r.memo.isNotEmpty()) " · " + r.memo else ""}",
-                            fontSize = 12.sp, color = Color.Gray)
-                        if (r.google == Sync.FAILED && r.lastError.isNotEmpty()) Text(r.lastError, fontSize = 11.sp, color = Color(0xFFE5484D))
-                    }
-                    Text(when (r.google) { Sync.DONE -> "✓ 전송됨"; Sync.PENDING -> "대기"; Sync.FAILED -> "다시 시도"; Sync.OFF -> "" },
-                        fontSize = 12.sp, color = when (r.google) { Sync.DONE -> Color(0xFF1F9D6B); Sync.FAILED -> Color(0xFFE5484D); else -> Color.Gray })
-                    IconButton({ confirmDelete = r }) { Icon(Icons.Filled.DeleteOutline, "삭제", tint = Color.Gray) }
-                } }
-            }
-        }
-    }
-    confirmDelete?.let { r ->
-        AlertDialog(onDismissRequest = { confirmDelete = null }, title = { Text("이 녹음을 지울까요?") },
-            text = { Text(if (r.google == Sync.DONE) "컴퓨터에는 이미 전송되어 보관되어 있습니다." else "아직 컴퓨터로 전송되지 않았습니다. 지우면 되돌릴 수 없습니다.") },
-            confirmButton = { TextButton({ Store.delete(r); confirmDelete = null }) { Text("지우기", color = Color(0xFFE5484D)) } },
-            dismissButton = { TextButton({ confirmDelete = null }) { Text("취소") } })
-    }
+private fun greeting(recording: Boolean): String {
+    if (recording) return "잘 듣고 있어요"
+    val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    return if (h < 12) "좋은 아침이에요!" else if (h < 17) "오늘 수업, 한마디 남겨요" else "오늘도 수고하셨어요"
 }
 
 @Composable
-fun ConnectScreen() {
+fun UpdateCard(r: Updater.Release) {
     val ctx = LocalContext.current
-    val paired by Store.paired.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    var result by remember { mutableStateOf("") }
-    var manual by remember { mutableStateOf(false) }
-    var code by remember { mutableStateOf("") }
-
-    fun test() = scope.launch {
-        result = "확인 중…"
-        result = try {
-            withContext(Dispatchers.IO) { UploadWorker.post(Store.googleUrl(), JSONObject().put("action", "ping_phone").put("token", Store.googleToken())) }
-            "✓ 연결되었습니다"
-        } catch (e: Exception) { e.message ?: "연결 실패" }
+    val status by Updater.status.collectAsStateWithLifecycle()
+    val busy by Updater.busy.collectAsStateWithLifecycle()
+    Column(Modifier.fillMaxWidth().card(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("새 버전 ${r.version}이 나왔어요 ✨", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = T.ink, modifier = Modifier.weight(1f))
+            if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            else ChipButton("업데이트", T.blue, filled = true) { scope.launch { Updater.downloadAndInstall(ctx, r) } }
+        }
+        Text(status.ifEmpty { "누르면 새 버전을 받아 설치 화면을 열어요. 처음 한 번은 ‘이 출처의 앱 설치 허용’을 켜 주세요. 기록은 그대로 남아요." },
+            fontSize = 12.sp, color = T.soft)
     }
-    fun handle(text: String) {
-        val p = Store.parsePairing(text)
-        if (p == null) result = "쓰담 연결 QR이 아닙니다." else { Store.pair(p.first, p.second, p.third); test() }
-    }
-    val scan = rememberLauncherForActivityResult(ScanContract()) { r -> r.contents?.let(::handle) }
+}
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("연결", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("컴퓨터와 연결 (구글 드라이브)", fontWeight = FontWeight.SemiBold)
-            if (paired) {
-                Text("연결됨 · ${Store.teacherName().ifEmpty { "내 구글 드라이브" }}", color = Color(0xFF1F9D6B))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(::test) { Text("연결 확인") }
-                    TextButton({ Store.unpair(); result = "" }) { Text("연결 끊기", color = Color(0xFFE5484D)) }
-                }
-            } else {
-                Button({ scan.launch(ScanOptions().setPrompt("컴퓨터 화면의 QR을 비춰 주세요").setBeepEnabled(false).setOrientationLocked(true)) }) {
-                    Icon(Icons.Filled.QrCodeScanner, null); Spacer(Modifier.width(8.dp)); Text("컴퓨터 화면의 QR 찍기")
-                }
-                TextButton({ manual = true }) { Text("연결 코드 붙여넣기") }
+/** 방금 담은 기록 카드 */
+@Composable
+fun SavedCard(e: Recording, db: DB, paired: Boolean, nav: Nav, onClose: () -> Unit) {
+    Column(Modifier.fillMaxWidth().card(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("✅ " + if (e.isAudio) "녹음을 담았어요 · ${timeString((e.durationSec * 1000).toLong())}" else "메모를 담았어요",
+                fontSize = 16.sp, fontWeight = FontWeight.Bold, color = T.ink, modifier = Modifier.weight(1f))
+            IconButton(onClose, Modifier.size(28.dp)) { Icon(Icons.Filled.Close, "닫기", tint = T.soft) }
+        }
+        val names = e.splitNames
+        if (names != null) {
+            if (names.isNotEmpty()) NameChips(names)
+            if (e.splitUnsure > 0 || e.splitLeftover.isNotEmpty() || names.isEmpty()) {
+                Text("👆 " + when {
+                    names.isEmpty() -> "누구 이야기인지 골라 주세요"
+                    e.splitUnsure > 0 -> "이름이 같은 학생이 있어요 · 눌러서 확인"
+                    else -> "이름이 안 나온 부분이 있어요 · 눌러서 정리"
+                }, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD9A400),
+                    modifier = Modifier.clickable { nav.switch(1, Route.Entry(e.id)) })
             }
-            if (result.isNotEmpty()) Text(result, fontSize = 13.sp, color = if (result.startsWith("✓")) Color(0xFF1F9D6B) else Color(0xFFE5484D))
-            Text("컴퓨터의 쓰담 → 설정 → '휴대폰 쓰담 앱 연결'에 나오는 QR을 찍으세요. 녹음은 선생님 본인의 구글 드라이브를 거쳐 컴퓨터로 갑니다. 이 앱은 녹음을 올리기만 할 수 있고, 학생 기록을 볼 수는 없습니다.",
-                fontSize = 12.sp, color = Color.Gray)
-        } }
-        Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("녹음 보관", fontWeight = FontWeight.SemiBold)
-            Text("녹음은 선생님이 지우기 전까지 휴대폰에 그대로 보관됩니다. 컴퓨터의 쓰담과 구글 드라이브에도 원본이 학기말 이후까지 보관됩니다.", fontSize = 13.sp, color = Color.Gray)
-        } }
-        TextButton({ ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/hanseolhui/sseudam"))) }) { Text("컴퓨터용 쓰담 설치·사용법") }
-        TextButton({ ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://hanseolhui.github.io/sseudam/privacy.html"))) }) { Text("개인정보 처리방침") }
+        } else if (!e.isAudio && !db.hasRoster) {
+            Text("‘학생’ 탭에 명단을 넣으면 이름이 나온 곳마다 학생별로 나눠 담아요.", fontSize = 12.sp, color = T.soft)
+        }
+        Text(if (paired) "☁️ 구글 드라이브로 보내요 · 컴퓨터 쓰담이 켜지면 가져가요"
+            else "📱 휴대폰에 보관했어요 · ‘연결’에서 컴퓨터와 연결하면 보내져요", fontSize = 12.sp, color = T.soft)
     }
-    if (manual) AlertDialog(onDismissRequest = { manual = false }, title = { Text("연결 코드") },
-        text = { OutlinedTextField(code, { code = it }, placeholder = { Text("sseudam://pair?…") }) },
-        confirmButton = { TextButton({ manual = false; handle(code); code = "" }) { Text("연결") } },
-        dismissButton = { TextButton({ manual = false }) { Text("취소") } })
+}
+
+/** 한 줄로 남기기 — 글로 쓰거나, 🎤로 말하면 기기 받아쓰기로 글자가 된다 */
+@Composable
+fun MemoCard(recording: Boolean, onSaved: (Recording) -> Unit) {
+    val ctx = LocalContext.current
+    var memo by remember { mutableStateOf("") }
+    var base by remember { mutableStateOf("") }
+    val dict = remember {
+        Dictation(ctx, onPartial = { p -> memo = (base + " " + p).trim() }, onFinal = { f -> memo = (base + " " + f).trim(); base = memo })
+    }
+    DisposableEffect(Unit) { onDispose { dict.destroy() } }
+    val listening by dict.listening.collectAsStateWithLifecycle()
+    val err by dict.error.collectAsStateWithLifecycle()
+    val perm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) { base = memo; dict.start() } }
+
+    Column(Modifier.fillMaxWidth().card(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("✏️ 한 줄로 남기기", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = T.ink)
+        OutlinedTextField(memo, { memo = it; base = it }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5,
+            placeholder = { Text("예) 2학년 3반 이서연, 발표 자료를 꼼꼼하게 준비해 옴 🌱", color = T.soft) },
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = T.bg, focusedContainerColor = T.bg,
+                unfocusedBorderColor = Color.Transparent, focusedBorderColor = T.blue.copy(alpha = 0.4f)))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (dict.available()) {
+                Box(Modifier.size(40.dp).clip(CircleShape).background(if (listening) T.coral else T.blue.copy(alpha = 0.12f))
+                    .clickable(enabled = !recording) {
+                        if (listening) dict.stop()
+                        else if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) { base = memo; dict.start() }
+                        else perm.launch(Manifest.permission.RECORD_AUDIO)
+                    }, contentAlignment = Alignment.Center) {
+                    Icon(if (listening) Icons.Filled.Stop else Icons.Filled.Mic, "말로 받아쓰기", tint = if (listening) Color.White else T.blue)
+                }
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(when {
+                recording -> "녹음 중에는 글로 남겨 주세요"
+                listening -> "듣고 있어요… 말을 멈추면 글자가 돼요"
+                err.isNotEmpty() -> err
+                else -> "🎤를 누르거나 키보드의 🎤로 말해도 돼요"
+            }, fontSize = 12.sp, color = if (err.isNotEmpty() && !listening) T.coral else T.soft, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            ChipButton("담기", if (memo.isBlank()) Color.Gray else T.blue, filled = true) {
+                if (memo.isBlank()) return@ChipButton
+                dict.destroy()
+                Store.addText(memo)?.let(onSaved)
+                memo = ""; base = ""
+            }
+        }
+    }
 }

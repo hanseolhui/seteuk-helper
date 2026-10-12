@@ -61,9 +61,9 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
             try {
                 val bytes = Store.file(r).readBytes()
                 post(url, JSONObject().put("action", "upload_recording").put("token", token).put("filename", r.fileName)
-                    .put("mime", "audio/mp4").put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
+                    .put("mime", if (r.isAudio) "audio/mp4" else "text/plain").put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
                     .put("recorded_at", df.format(Date(r.createdAt))).put("kind", r.kind)
-                    .put("title", r.fileName.removeSuffix(".m4a")).put("memo", r.memo).put("device", Build.MODEL))
+                    .put("title", r.fileName.substringBeforeLast('.')).put("memo", r.memo).put("device", Build.MODEL))
                 Store.update(r.copy(google = Sync.DONE, lastError = ""))
             } catch (e: Exception) {
                 failed = true
