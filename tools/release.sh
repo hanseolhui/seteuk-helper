@@ -1,0 +1,19 @@
+#!/bin/bash
+# 새 버전 배포:  tools/release.sh 1.2.0 "바뀐 점 설명"
+# → 버전 올리기, 앱/DMG 빌드, git 커밋·태그·푸시, GitHub 릴리스 생성(파일 3개 첨부)
+# 선생님 맥의 세특도우미가 실행될 때 새 버전을 알려주고, 버튼 한 번으로 업데이트됩니다.
+set -euo pipefail
+V="${1:?사용법: tools/release.sh 1.2.0 \"바뀐 점\"}"
+NOTES="${2:-}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
+[[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "버전은 1.2.0 형식으로"; exit 1; }
+if [ -n "$(git status --porcelain)" ]; then echo "커밋하지 않은 변경이 있습니다. 먼저 커밋하세요."; git status --short; exit 1; fi
+sed -i '' "s/^VERSION = .*/VERSION = \"$V\"/" app/version.py
+./macos/build_app.sh
+git add app/version.py
+git commit -m "Release v$V"
+git tag "v$V"
+git push origin HEAD --tags
+if [ -n "$NOTES" ]; then N=(--notes "$NOTES"); else N=(--generate-notes); fi
+gh release create "v$V" dist/SeteukHelper.dmg dist/SeteukHelper-mac.zip dist/seteuk-app.zip --title "세특도우미 $V" "${N[@]}"
+echo "배포 완료: v$V"

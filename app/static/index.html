@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>세특도우미</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">세특도우미</div>
+    <nav>
+      <a href="#/" data-nav="dashboard">대시보드</a>
+      <a href="#/recordings" data-nav="recordings">녹음함 <span id="nav-pending" class="pill hidden"></span></a>
+      <a href="#/classes" data-nav="classes">학급·학생</a>
+      <a href="#/drafts" data-nav="drafts">세특 초안</a>
+      <a href="#/settings" data-nav="settings">설정</a>
+    </nav>
+    <div class="sidebar-foot">
+      <div id="mode-badge" class="mode-badge"></div>
+      <div id="ver-badge" class="mode-badge"></div>
+      <button class="link" id="btn-quit">프로그램 종료</button>
+    </div>
+  </aside>
+  <div class="main-col">
+    <div id="update-banner" class="update-banner hidden"></div>
+    <main id="view" class="main"></main>
+  </div>
+</div>
+
+<button id="jobs-fab" class="jobs-fab hidden"></button>
+<div id="jobs-panel" class="jobs-panel hidden"></div>
+<div id="toast" class="toast hidden"></div>
+<div id="modal" class="modal hidden"><div class="modal-box" id="modal-box"></div></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

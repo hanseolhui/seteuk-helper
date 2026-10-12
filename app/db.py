@@ -1,0 +1,243 @@
+# -*- coding: utf-8 -*-
+"""SQLite 저장소. Python 3.9 표준 라이브러리만 사용."""
+import os
+import shutil
+import sqlite3
+import datetime
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(APP_DIR)
+# 데이터는 프로그램(코드)과 분리해 사용자 라이브러리에 둔다 → 업데이트·재설치해도 기록이 보존됨
+SUPPORT_DIR = os.path.expanduser("~/Library/Application Support/세특도우미")
+DATA_DIR = os.environ.get("SETEUK_DATA") or os.path.join(SUPPORT_DIR, "data")
+AUDIO_DIR = os.path.join(DATA_DIR, "audio")
+BACKUP_DIR = os.path.join(DATA_DIR, "backups")
+DB_PATH = os.path.join(DATA_DIR, "seteuk.db")
+
+DEFAULT_SETTINGS = {
+    "mode": "api",                      # api | manual
+    "gemini_api_key": "",
+    "gemini_model": "gemini-2.5-flash",
+    "byte_limit": "1500",
+    "school_level": "고등학교",
+    "teacher_subject": "",
+    "style_examples": "",
+    "draft_guidance": "",
+    "inbox_dir": os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs/세특녹음"),
+    "auto_process": "1",                # 수신 폴더 파일을 자동 전사·분리
+    "sheets_url": "",
+    "sheets_token": "",
+    # 아이폰 음성메모 자동 가져오기 (iCloud 동기화된 맥의 음성메모 보관함)
+    "voicememo_enabled": "0",
+    "voicememo_since": "",          # 이 시각 이후 녹음만 가져옴 (켜는 순간으로 설정)
+    "voicememo_keyword": "",        # 제목에 이 단어가 있는 녹음만 (비우면 전부)
+    # 메모 앱(받아쓰기) 가져오기
+    "notes_enabled": "0",
+    "notes_folder": "세특",
+    # 시간표: 녹음 시각으로 학급 자동 지정
+    "period_times": "09:00-09:50\n10:00-10:50\n11:00-11:50\n12:00-12:50\n13:40-14:30\n14:40-15:30\n15:40-16:30",
+    "timetable": "{}",              # {"1-3": 학급id} = 월요일 3교시
+    "update_check": "1",
+}
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS classes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    year INTEGER, semester INTEGER, grade INTEGER, class_no INTEGER,
+    subject TEXT DEFAULT '', label TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS students (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+    number INTEGER, name TEXT NOT NULL, aliases TEXT DEFAULT '', memo TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS recordings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL,
+    kind TEXT DEFAULT '수업', title TEXT DEFAULT '',
+    recorded_at TEXT, audio_path TEXT, original_name TEXT,
+    transcript TEXT DEFAULT '', status TEXT DEFAULT '보관됨', error TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    recording_id INTEGER REFERENCES recordings(id) ON DELETE SET NULL,
+    date TEXT, kind TEXT DEFAULT '수업', category TEXT DEFAULT '',
+    content TEXT NOT NULL, evidence TEXT DEFAULT '', use_in_draft INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS unmatched (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recording_id INTEGER REFERENCES recordings(id) ON DELETE CASCADE,
+    name_heard TEXT, content TEXT, evidence TEXT DEFAULT '', category TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    area TEXT DEFAULT '세특', content TEXT, bytes INTEGER, status TEXT DEFAULT '초안',
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    op TEXT, params TEXT, label TEXT DEFAULT '', status TEXT DEFAULT '대기',
+    message TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now','localtime')), finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS imported (
+    source TEXT, ext_id TEXT, sig TEXT DEFAULT '', body TEXT DEFAULT '', recording_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (source, ext_id)
+);
+CREATE INDEX IF NOT EXISTS idx_students_class ON students(class_id);
+CREATE INDEX IF NOT EXISTS idx_notes_student ON notes(student_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_student ON drafts(student_id);
+"""
+
+
+def connect():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def _migrate_legacy_data():
+    """1.0.x는 프로그램 폴더 안 data/ 에 저장했음 → 새 위치로 옮김."""
+    legacy = os.path.join(BASE_DIR, "data")
+    if os.path.abspath(legacy) == os.path.abspath(DATA_DIR):
+        return
+    if os.path.exists(os.path.join(legacy, "seteuk.db")) and not os.path.exists(DB_PATH):
+        os.makedirs(os.path.dirname(DATA_DIR), exist_ok=True)
+        if os.path.isdir(DATA_DIR):
+            os.rmdir(DATA_DIR)  # 비어 있는 경우만
+        shutil.copytree(legacy, DATA_DIR)
+        # 녹음 경로를 새 위치로 고침
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("UPDATE recordings SET audio_path = REPLACE(audio_path, ?, ?) WHERE audio_path IS NOT NULL",
+                     (os.path.abspath(legacy), os.path.abspath(DATA_DIR)))
+        conn.commit()
+        conn.close()
+        os.rename(legacy, legacy + "_옮겨짐")
+
+
+def init():
+    try:
+        _migrate_legacy_data()
+    except OSError as e:
+        print("이전 데이터 옮기기 실패:", e)
+    for d in (DATA_DIR, AUDIO_DIR, BACKUP_DIR):
+        os.makedirs(d, exist_ok=True)
+    conn = connect()
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.executescript(SCHEMA)
+    for k, v in DEFAULT_SETTINGS.items():
+        conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
+    # 비정상 종료로 '진행중'에 남은 작업 정리
+    conn.execute("UPDATE jobs SET status='실패', message='프로그램 재시작으로 중단됨' WHERE status IN ('대기','진행중')")
+    conn.execute("UPDATE recordings SET status='오류', error='프로그램 재시작으로 중단됨' WHERE status IN ('전사중','분리중')")
+    conn.commit()
+    conn.close()
+    daily_backup()
+
+
+def daily_backup():
+    if not os.path.exists(DB_PATH):
+        return
+    today = datetime.date.today().strftime("%Y%m%d")
+    target = os.path.join(BACKUP_DIR, "seteuk-%s.db" % today)
+    if not os.path.exists(target):
+        backup_to(target)
+    files = sorted(f for f in os.listdir(BACKUP_DIR) if f.startswith("seteuk-") and f.endswith(".db"))
+    for f in files[:-30]:
+        try:
+            os.remove(os.path.join(BACKUP_DIR, f))
+        except OSError:
+            pass
+
+
+def backup_to(path):
+    src = connect()
+    dst = sqlite3.connect(path)
+    with dst:
+        src.backup(dst)
+    dst.close()
+    src.close()
+    return path
+
+
+def rows(conn, sql, args=()):
+    return [dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
+def row(conn, sql, args=()):
+    r = conn.execute(sql, args).fetchone()
+    return dict(r) if r else None
+
+
+def get_settings(conn=None):
+    own = conn is None
+    conn = conn or connect()
+    s = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings")}
+    if own:
+        conn.close()
+    for k, v in DEFAULT_SETTINGS.items():
+        s.setdefault(k, v)
+    return s
+
+
+def set_settings(values):
+    conn = connect()
+    for k, v in values.items():
+        if k in DEFAULT_SETTINGS:
+            conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)", (k, str(v)))
+    conn.commit()
+    conn.close()
+
+
+def class_label(c):
+    label = "%s학년 %s반" % (c.get("grade") or "?", c.get("class_no") or "?")
+    if c.get("subject"):
+        label += " " + c["subject"]
+    return label
+
+
+def neis_bytes(text):
+    """NEIS 기준 바이트: 한글 등 비ASCII 3B, ASCII 1B, 줄바꿈 2B."""
+    if not text:
+        return 0
+    text = text.replace("\r\n", "\n")
+    n = 0
+    for ch in text:
+        if ch == "\n":
+            n += 2
+        elif ord(ch) < 128:
+            n += 1
+        else:
+            n += 3
+    return n
+
+
+def move_audio_into_archive(src_path, recorded_at, class_hint, kind, copy=True):
+    """원본 녹음을 data/audio/YYYY/MM/ 아래로 보관하고 새 경로 반환."""
+    try:
+        dt = datetime.datetime.strptime(recorded_at[:16], "%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        dt = datetime.datetime.now()
+    folder = os.path.join(AUDIO_DIR, dt.strftime("%Y"), dt.strftime("%m"))
+    os.makedirs(folder, exist_ok=True)
+    ext = os.path.splitext(src_path)[1].lower() or ".m4a"
+    safe_hint = "".join(ch for ch in (class_hint or "") if ch.isalnum() or ch in "-_")
+    base = "%s_%s%s" % (dt.strftime("%Y%m%d-%H%M"), kind, ("_" + safe_hint) if safe_hint else "")
+    dest = os.path.join(folder, base + ext)
+    i = 2
+    while os.path.exists(dest):
+        dest = os.path.join(folder, "%s-%d%s" % (base, i, ext))
+        i += 1
+    if copy:
+        shutil.copy2(src_path, dest)
+    else:
+        shutil.move(src_path, dest)
+    return dest

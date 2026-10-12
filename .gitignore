@@ -1,0 +1,9 @@
+data/
+data_옮겨짐/
+build/
+dist/
+__pycache__/
+*.pyc
+.DS_Store
+*.zip
+.claude/

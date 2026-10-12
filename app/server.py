@@ -1,0 +1,948 @@
+# -*- coding: utf-8 -*-
+"""세특도우미 로컬 서버. 실행: python3 app/server.py"""
+import datetime
+import json
+import mimetypes
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import threading
+import traceback
+import urllib.parse
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import db  # noqa: E402
+import gemini  # noqa: E402
+import pipeline  # noqa: E402
+import prompts  # noqa: E402
+import sheets  # noqa: E402
+import update  # noqa: E402
+import version  # noqa: E402
+import watcher  # noqa: E402
+
+HOST, PORT = "127.0.0.1", int(os.environ.get("SETEUK_PORT", "8765"))
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+ALLOWED_HOSTS = {"127.0.0.1:%d" % PORT, "localhost:%d" % PORT}
+
+ROUTES = []
+
+
+def route(method, pattern):
+    def deco(fn):
+        ROUTES.append((method, re.compile("^" + pattern + "$"), fn))
+        return fn
+    return deco
+
+
+class ApiError(Exception):
+    def __init__(self, msg, code=400):
+        Exception.__init__(self, msg)
+        self.code = code
+
+
+def now_str():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def _int(v, default=None):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def open_in_finder(path, reveal=False):
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", path] if reveal else ["open", path])
+
+
+# ───────────────────────── 대시보드 ─────────────────────────
+
+@route("GET", "/api/dashboard")
+def dashboard(h, q, body):
+    conn = db.connect()
+    try:
+        t = {
+            "classes": conn.execute("SELECT COUNT(*) FROM classes").fetchone()[0],
+            "students": conn.execute("SELECT COUNT(*) FROM students").fetchone()[0],
+            "recordings": conn.execute("SELECT COUNT(*) FROM recordings").fetchone()[0],
+            "notes": conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0],
+            "with_notes": conn.execute("SELECT COUNT(DISTINCT student_id) FROM notes").fetchone()[0],
+            "drafted": conn.execute("SELECT COUNT(DISTINCT student_id) FROM drafts").fetchone()[0],
+            "finalized": conn.execute("SELECT COUNT(DISTINCT student_id) FROM drafts WHERE status='확정'").fetchone()[0],
+            "pending_review": conn.execute("SELECT COUNT(*) FROM recordings WHERE status IN ('확인필요','오류','보관됨')").fetchone()[0],
+        }
+        classes = db.rows(conn, """
+            SELECT c.*,
+              (SELECT COUNT(*) FROM students s WHERE s.class_id=c.id) AS students,
+              (SELECT COUNT(DISTINCT n.student_id) FROM notes n JOIN students s ON s.id=n.student_id WHERE s.class_id=c.id) AS with_notes,
+              (SELECT COUNT(*) FROM notes n JOIN students s ON s.id=n.student_id WHERE s.class_id=c.id) AS notes,
+              (SELECT COUNT(DISTINCT d.student_id) FROM drafts d JOIN students s ON s.id=d.student_id WHERE s.class_id=c.id) AS drafted,
+              (SELECT COUNT(DISTINCT d.student_id) FROM drafts d JOIN students s ON s.id=d.student_id WHERE s.class_id=c.id AND d.status='확정') AS finalized,
+              (SELECT COUNT(*) FROM recordings r WHERE r.class_id=c.id) AS recordings
+            FROM classes c ORDER BY c.year DESC, c.semester DESC, c.grade, c.class_no""")
+        for c in classes:
+            c["label"] = db.class_label(c)
+        start = (datetime.date.today() - datetime.timedelta(weeks=11)).isoformat()
+        weekly_raw = db.rows(conn, """SELECT date, kind, COUNT(*) AS n FROM notes WHERE date >= ? GROUP BY date, kind""",
+                             (start,))
+        weeks = []
+        today = datetime.date.today()
+        monday = today - datetime.timedelta(days=today.weekday())
+        for i in range(11, -1, -1):
+            ws = monday - datetime.timedelta(weeks=i)
+            weeks.append({"start": ws.isoformat(), "label": "%d/%d" % (ws.month, ws.day), "수업": 0, "상담": 0})
+        for r in weekly_raw:
+            try:
+                d = datetime.date.fromisoformat(r["date"][:10])
+            except (TypeError, ValueError):
+                continue
+            idx = 11 - (monday - (d - datetime.timedelta(days=d.weekday()))).days // 7
+            if 0 <= idx < 12:
+                key = "상담" if r["kind"] == "상담" else "수업"
+                weeks[idx][key] += r["n"]
+        needy = db.rows(conn, """
+            SELECT s.id, s.number, s.name, c.grade, c.class_no, c.subject,
+                   (SELECT COUNT(*) FROM notes n WHERE n.student_id=s.id) AS notes,
+                   (SELECT MAX(date) FROM notes n WHERE n.student_id=s.id) AS last_date
+            FROM students s JOIN classes c ON c.id=s.class_id
+            ORDER BY notes ASC, last_date ASC, c.grade, c.class_no, s.number LIMIT 12""")
+        for n in needy:
+            n["label"] = db.class_label(n)
+        categories = db.rows(conn, "SELECT COALESCE(NULLIF(category,''),'기타') AS category, COUNT(*) AS n "
+                                   "FROM notes GROUP BY 1 ORDER BY n DESC")
+        recent = db.rows(conn, """SELECT r.id, r.title, r.kind, r.status, r.recorded_at, c.grade, c.class_no, c.subject,
+                   (SELECT COUNT(*) FROM notes n WHERE n.recording_id=r.id) AS notes
+                   FROM recordings r LEFT JOIN classes c ON c.id=r.class_id ORDER BY r.recorded_at DESC, r.id DESC LIMIT 8""")
+        for r in recent:
+            r["label"] = db.class_label(r) if r.get("grade") else "학급 미지정"
+        return {"totals": t, "classes": classes, "weeks": weeks, "needy": needy,
+                "categories": categories, "recent": recent}
+    finally:
+        conn.close()
+
+
+# ───────────────────────── 학급 / 학생 ─────────────────────────
+
+@route("GET", "/api/classes")
+def classes_list(h, q, body):
+    conn = db.connect()
+    cs = db.rows(conn, """SELECT c.*, (SELECT COUNT(*) FROM students s WHERE s.class_id=c.id) AS students
+                          FROM classes c ORDER BY c.year DESC, c.semester DESC, c.grade, c.class_no, c.subject""")
+    conn.close()
+    for c in cs:
+        c["label"] = db.class_label(c)
+    return {"classes": cs}
+
+
+@route("POST", "/api/classes/save")
+def classes_save(h, q, b):
+    vals = (_int(b.get("year"), datetime.date.today().year), _int(b.get("semester"), 1),
+            _int(b.get("grade")), _int(b.get("class_no")), (b.get("subject") or "").strip())
+    if not vals[2] or not vals[3]:
+        raise ApiError("학년과 반을 입력하세요.")
+    conn = db.connect()
+    if b.get("id"):
+        conn.execute("UPDATE classes SET year=?, semester=?, grade=?, class_no=?, subject=? WHERE id=?",
+                     vals + (int(b["id"]),))
+        cid = int(b["id"])
+    else:
+        cid = conn.execute("INSERT INTO classes(year, semester, grade, class_no, subject) VALUES (?,?,?,?,?)",
+                           vals).lastrowid
+    conn.commit()
+    conn.close()
+    return {"ok": True, "id": cid}
+
+
+@route("POST", "/api/classes/delete")
+def classes_delete(h, q, b):
+    conn = db.connect()
+    conn.execute("DELETE FROM classes WHERE id=?", (int(b["id"]),))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@route("GET", r"/api/classes/(\d+)")
+def class_detail(h, q, b, cid):
+    conn = db.connect()
+    try:
+        c = db.row(conn, "SELECT * FROM classes WHERE id=?", (int(cid),))
+        if not c:
+            raise ApiError("학급이 없습니다.", 404)
+        c["label"] = db.class_label(c)
+        students = db.rows(conn, """
+            SELECT s.*, (SELECT COUNT(*) FROM notes n WHERE n.student_id=s.id) AS notes,
+                   (SELECT MAX(date) FROM notes n WHERE n.student_id=s.id) AS last_date,
+                   (SELECT status FROM drafts d WHERE d.student_id=s.id ORDER BY (status='확정') DESC, id DESC LIMIT 1) AS draft_status,
+                   (SELECT bytes FROM drafts d WHERE d.student_id=s.id ORDER BY (status='확정') DESC, id DESC LIMIT 1) AS draft_bytes,
+                   (SELECT content FROM drafts d WHERE d.student_id=s.id ORDER BY (status='확정') DESC, id DESC LIMIT 1) AS draft
+            FROM students s WHERE s.class_id=? ORDER BY s.number, s.name""", (int(cid),))
+        return {"class": c, "students": students, "byte_limit": int(db.get_settings(conn)["byte_limit"] or 1500)}
+    finally:
+        conn.close()
+
+
+def parse_roster(text):
+    """'1 김민수', '1\t김민수', '1번 김민수', '김민수' 형식을 모두 허용."""
+    out = []
+    auto_no = 1
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        cells = [x for x in re.split(r"[\t,]+|\s{2,}", line) if x.strip()]
+        if len(cells) == 1:
+            cells = line.split()
+        num, name = None, None
+        for cell in cells:
+            cell = cell.strip()
+            m = re.fullmatch(r"(\d{1,3})\s*번?", cell)
+            if m and num is None:
+                num = int(m.group(1))
+            elif re.fullmatch(r"[가-힣A-Za-z·\s]{2,20}", cell) and name is None:
+                name = cell.replace(" ", "")
+        if not name:
+            continue
+        if num is None:
+            num = auto_no
+        auto_no = num + 1
+        out.append((num, name))
+    return out
+
+
+@route("POST", "/api/students/bulk")
+def students_bulk(h, q, b):
+    cid = int(b["class_id"])
+    parsed = parse_roster(b.get("text", ""))
+    if not parsed:
+        raise ApiError("명단을 읽지 못했습니다. 한 줄에 '번호 이름' 형식으로 붙여넣으세요.")
+    conn = db.connect()
+    added, updated = 0, 0
+    for num, name in parsed:
+        ex = db.row(conn, "SELECT id FROM students WHERE class_id=? AND number=?", (cid, num))
+        if ex:
+            conn.execute("UPDATE students SET name=? WHERE id=?", (name, ex["id"]))
+            updated += 1
+        else:
+            conn.execute("INSERT INTO students(class_id, number, name) VALUES (?,?,?)", (cid, num, name))
+            added += 1
+    conn.commit()
+    conn.close()
+    return {"ok": True, "added": added, "updated": updated}
+
+
+@route("POST", "/api/students/save")
+def students_save(h, q, b):
+    name = (b.get("name") or "").strip()
+    if not name:
+        raise ApiError("이름을 입력하세요.")
+    conn = db.connect()
+    vals = (_int(b.get("number")), name, (b.get("aliases") or "").strip(), (b.get("memo") or "").strip())
+    if b.get("id"):
+        conn.execute("UPDATE students SET number=?, name=?, aliases=?, memo=? WHERE id=?", vals + (int(b["id"]),))
+        sid = int(b["id"])
+    else:
+        sid = conn.execute("INSERT INTO students(number, name, aliases, memo, class_id) VALUES (?,?,?,?,?)",
+                           vals + (int(b["class_id"]),)).lastrowid
+    conn.commit()
+    conn.close()
+    return {"ok": True, "id": sid}
+
+
+@route("POST", "/api/students/delete")
+def students_delete(h, q, b):
+    conn = db.connect()
+    conn.execute("DELETE FROM students WHERE id=?", (int(b["id"]),))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@route("GET", r"/api/students/(\d+)")
+def student_detail(h, q, b, sid):
+    conn = db.connect()
+    try:
+        s = db.row(conn, "SELECT * FROM students WHERE id=?", (int(sid),))
+        if not s:
+            raise ApiError("학생이 없습니다.", 404)
+        c = db.row(conn, "SELECT * FROM classes WHERE id=?", (s["class_id"],))
+        c["label"] = db.class_label(c)
+        notes = db.rows(conn, """SELECT n.*, r.title AS rec_title, r.audio_path IS NOT NULL AS has_audio
+                                 FROM notes n LEFT JOIN recordings r ON r.id=n.recording_id
+                                 WHERE n.student_id=? ORDER BY n.date DESC, n.id DESC""", (int(sid),))
+        drafts = db.rows(conn, "SELECT * FROM drafts WHERE student_id=? ORDER BY id DESC", (int(sid),))
+        for d in drafts:
+            d["forbidden"] = prompts.check_forbidden(d["content"])
+        siblings = db.rows(conn, "SELECT id, number, name FROM students WHERE class_id=? ORDER BY number, name",
+                           (s["class_id"],))
+        return {"student": s, "class": c, "notes": notes, "drafts": drafts, "siblings": siblings,
+                "byte_limit": int(db.get_settings(conn)["byte_limit"] or 1500)}
+    finally:
+        conn.close()
+
+
+# ───────────────────────── 관찰기록 ─────────────────────────
+
+@route("POST", "/api/notes/save")
+def notes_save(h, q, b):
+    content = (b.get("content") or "").strip()
+    if not content:
+        raise ApiError("내용을 입력하세요.")
+    conn = db.connect()
+    if b.get("id"):
+        conn.execute("UPDATE notes SET student_id=COALESCE(?, student_id), date=?, kind=?, category=?, content=?, "
+                     "use_in_draft=? WHERE id=?",
+                     (_int(b.get("student_id")), b.get("date") or datetime.date.today().isoformat(),
+                      b.get("kind") or "수업", b.get("category") or "", content,
+                      1 if b.get("use_in_draft", True) else 0, int(b["id"])))
+    else:
+        conn.execute("INSERT INTO notes(student_id, date, kind, category, content, recording_id, use_in_draft) "
+                     "VALUES (?,?,?,?,?,?,1)",
+                     (int(b["student_id"]), b.get("date") or datetime.date.today().isoformat(),
+                      b.get("kind") or "수업", b.get("category") or "", content, _int(b.get("recording_id"))))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@route("POST", "/api/notes/delete")
+def notes_delete(h, q, b):
+    conn = db.connect()
+    conn.execute("DELETE FROM notes WHERE id=?", (int(b["id"]),))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ───────────────────────── 녹음 ─────────────────────────
+
+@route("GET", "/api/recordings")
+def recordings_list(h, q, b):
+    conn = db.connect()
+    where, args = "", []
+    if q.get("class_id"):
+        where, args = "WHERE r.class_id=?", [int(q["class_id"])]
+    recs = db.rows(conn, """SELECT r.id, r.class_id, r.kind, r.title, r.recorded_at, r.status, r.error, r.original_name,
+               r.audio_path IS NOT NULL AS has_audio, length(r.transcript) AS transcript_len,
+               c.grade, c.class_no, c.subject,
+               (SELECT COUNT(*) FROM notes n WHERE n.recording_id=r.id) AS notes,
+               (SELECT COUNT(*) FROM unmatched u WHERE u.recording_id=r.id) AS unmatched
+               FROM recordings r LEFT JOIN classes c ON c.id=r.class_id %s
+               ORDER BY r.recorded_at DESC, r.id DESC LIMIT 500""" % where, args)
+    conn.close()
+    for r in recs:
+        r["label"] = db.class_label(r) if r.get("grade") else "학급 미지정"
+    return {"recordings": recs}
+
+
+@route("GET", r"/api/recordings/(\d+)")
+def recording_detail(h, q, b, rid):
+    conn = db.connect()
+    try:
+        r = db.row(conn, "SELECT * FROM recordings WHERE id=?", (int(rid),))
+        if not r:
+            raise ApiError("녹음이 없습니다.", 404)
+        r["has_audio"] = bool(r["audio_path"] and os.path.exists(r["audio_path"]))
+        notes = db.rows(conn, """SELECT n.*, s.name, s.number FROM notes n JOIN students s ON s.id=n.student_id
+                                 WHERE n.recording_id=? ORDER BY s.number, n.id""", (int(rid),))
+        unmatched = db.rows(conn, "SELECT * FROM unmatched WHERE recording_id=? ORDER BY id", (int(rid),))
+        students = db.rows(conn, "SELECT id, number, name FROM students WHERE class_id=? ORDER BY number, name",
+                           (r["class_id"],)) if r["class_id"] else []
+        return {"recording": r, "notes": notes, "unmatched": unmatched, "students": students}
+    finally:
+        conn.close()
+
+
+@route("POST", "/api/recordings/upload")
+def recordings_upload(h, q, b):
+    filename = os.path.basename(q.get("filename") or "recording.m4a")
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in watcher.AUDIO_EXTS | watcher.TEXT_EXTS:
+        raise ApiError("지원하지 않는 파일 형식입니다: %s" % ext)
+    tmpdir = tempfile.mkdtemp(prefix="seteuk-up-")
+    tmp = os.path.join(tmpdir, filename)
+    with open(tmp, "wb") as f:
+        f.write(b)
+    try:
+        rid = watcher.import_file(tmp, class_id=_int(q.get("class_id")), kind=q.get("kind") or None,
+                                  title=q.get("title") or None, recorded_at=q.get("recorded_at") or None,
+                                  auto=(q.get("auto") == "1") or None, copy=False)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            os.rmdir(tmpdir)
+        except OSError:
+            pass
+    return {"ok": True, "id": rid}
+
+
+@route("POST", "/api/recordings/paste")
+def recordings_paste(h, q, b):
+    text = (b.get("transcript") or "").strip()
+    if not text:
+        raise ApiError("전사문을 붙여넣으세요.")
+    conn = db.connect()
+    rid = conn.execute("INSERT INTO recordings(class_id, kind, title, recorded_at, transcript, status, original_name) "
+                       "VALUES (?,?,?,?,?,?,?)",
+                       (_int(b.get("class_id")), b.get("kind") or "수업", b.get("title") or "붙여넣은 기록",
+                        b.get("recorded_at") or now_str(), text, "전사완료", "붙여넣기")).lastrowid
+    conn.commit()
+    conn.close()
+    return {"ok": True, "id": rid}
+
+
+@route("POST", "/api/recordings/update")
+def recordings_update(h, q, b):
+    conn = db.connect()
+    fields = {}
+    for k in ("kind", "title", "recorded_at", "transcript"):
+        if k in b:
+            fields[k] = b[k]
+    if "class_id" in b:
+        fields["class_id"] = _int(b["class_id"])
+    if "transcript" in b:
+        r = db.row(conn, "SELECT status FROM recordings WHERE id=?", (int(b["id"]),))
+        if r and r["status"] in ("보관됨", "오류") and (b["transcript"] or "").strip():
+            fields["status"] = "전사완료"
+    if fields:
+        conn.execute("UPDATE recordings SET %s WHERE id=?" % ", ".join("%s=?" % k for k in fields),
+                     list(fields.values()) + [int(b["id"])])
+        if "kind" in fields:
+            conn.execute("UPDATE notes SET kind=? WHERE recording_id=?", (fields["kind"], int(b["id"])))
+        if "recorded_at" in fields:
+            conn.execute("UPDATE notes SET date=? WHERE recording_id=?", ((fields["recorded_at"] or "")[:10], int(b["id"])))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@route("POST", "/api/recordings/mark_done")
+def recordings_done(h, q, b):
+    conn = db.connect()
+    conn.execute("UPDATE recordings SET status='완료' WHERE id=?", (int(b["id"]),))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@route("POST", "/api/recordings/delete")
+def recordings_delete(h, q, b):
+    conn = db.connect()
+    r = db.row(conn, "SELECT * FROM recordings WHERE id=?", (int(b["id"]),))
+    if r:
+        if b.get("delete_notes"):
+            conn.execute("DELETE FROM notes WHERE recording_id=?", (r["id"],))
+        conn.execute("DELETE FROM recordings WHERE id=?", (r["id"],))
+        conn.commit()
+        if b.get("delete_audio") and r["audio_path"] and os.path.exists(r["audio_path"]):
+            os.remove(r["audio_path"])
+    conn.close()
+    return {"ok": True}
+
+
+@route("POST", "/api/recordings/rule_segment")
+def recordings_rule(h, q, b):
+    return pipeline.rule_segment(int(b["id"]))
+
+
+@route("POST", "/api/recordings/reveal")
+def recordings_reveal(h, q, b):
+    conn = db.connect()
+    r = db.row(conn, "SELECT audio_path FROM recordings WHERE id=?", (int(b["id"]),))
+    conn.close()
+    if not r or not r["audio_path"] or not os.path.exists(r["audio_path"]):
+        raise ApiError("녹음 파일이 없습니다.")
+    open_in_finder(r["audio_path"], reveal=True)
+    return {"ok": True}
+
+
+@route("POST", "/api/unmatched/assign")
+def unmatched_assign(h, q, b):
+    conn = db.connect()
+    u = db.row(conn, "SELECT u.*, r.recorded_at, r.kind FROM unmatched u JOIN recordings r ON r.id=u.recording_id "
+                     "WHERE u.id=?", (int(b["id"]),))
+    if not u:
+        conn.close()
+        raise ApiError("항목이 없습니다.")
+    conn.execute("INSERT INTO notes(student_id, recording_id, date, kind, category, content, evidence) "
+                 "VALUES (?,?,?,?,?,?,?)",
+                 (int(b["student_id"]), u["recording_id"], (u["recorded_at"] or "")[:10], u["kind"],
+                  u["category"], u["content"], u["evidence"]))
+    conn.execute("DELETE FROM unmatched WHERE id=?", (u["id"],))
+    left = conn.execute("SELECT COUNT(*) FROM unmatched WHERE recording_id=?", (u["recording_id"],)).fetchone()[0]
+    if not left:
+        conn.execute("UPDATE recordings SET status='완료' WHERE id=? AND status='확인필요'", (u["recording_id"],))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@route("POST", "/api/unmatched/delete")
+def unmatched_delete(h, q, b):
+    conn = db.connect()
+    conn.execute("DELETE FROM unmatched WHERE id=?", (int(b["id"]),))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ───────────────────────── AI 작업 ─────────────────────────
+
+@route("POST", "/api/ai/run")
+def ai_run(h, q, b):
+    op, params = b["op"], b.get("params", {})
+    settings = db.get_settings()
+    if settings.get("mode") == "manual" or b.get("manual"):
+        p = pipeline.build_prompt(op, params)
+        return {"manual": True, "prompt": p["prompt"], "has_audio": bool(p.get("audio_path"))}
+    if not settings.get("gemini_api_key"):
+        raise ApiError("Gemini API 키가 없습니다. 설정에서 키를 입력하거나 '수동 모드'로 바꾸세요.")
+    pipeline.build_prompt(op, params)  # 사전 검증(관찰기록 없음 등)
+    labels = {"transcribe": "전사", "segment": "학생별 분리", "draft": "세특 초안", "shorten": "초안 줄이기"}
+    jid = pipeline.enqueue(op, params, "%s %s" % (labels.get(op, op), b.get("label", "")))
+    return {"ok": True, "job_id": jid}
+
+
+@route("POST", "/api/ai/apply")
+def ai_apply(h, q, b):
+    return pipeline.apply(b["op"], b.get("params", {}), b.get("text", ""))
+
+
+@route("POST", "/api/drafts/batch")
+def drafts_batch(h, q, b):
+    settings = db.get_settings()
+    if settings.get("mode") == "manual":
+        raise ApiError("일괄 생성은 API 모드에서만 가능합니다. 수동 모드에서는 학생별로 진행하세요.")
+    if not settings.get("gemini_api_key"):
+        raise ApiError("Gemini API 키가 없습니다.")
+    conn = db.connect()
+    students = db.rows(conn, """SELECT s.id, s.name, s.number FROM students s WHERE s.class_id=?
+                  AND EXISTS (SELECT 1 FROM notes n WHERE n.student_id=s.id AND n.use_in_draft=1)
+                  %s ORDER BY s.number""" % ("AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.student_id=s.id)"
+                                             if b.get("only_missing") else ""), (int(b["class_id"]),))
+    conn.close()
+    for s in students:
+        pipeline.enqueue("draft", {"student_id": s["id"]}, "세특 초안 %s번 %s" % (s["number"], s["name"]))
+    return {"ok": True, "count": len(students)}
+
+
+@route("GET", "/api/jobs")
+def jobs_list(h, q, b):
+    conn = db.connect()
+    jobs = db.rows(conn, "SELECT * FROM jobs ORDER BY id DESC LIMIT 40")
+    active = conn.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('대기','진행중')").fetchone()[0]
+    conn.close()
+    return {"jobs": jobs, "active": active}
+
+
+@route("POST", "/api/jobs/clear")
+def jobs_clear(h, q, b):
+    conn = db.connect()
+    conn.execute("DELETE FROM jobs WHERE status IN ('완료','실패')")
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@route("POST", "/api/jobs/cancel")
+def jobs_cancel(h, q, b):
+    conn = db.connect()
+    conn.execute("UPDATE jobs SET status='실패', message='사용자가 취소' WHERE status='대기'")
+    conn.execute("UPDATE recordings SET status='보관됨' WHERE status='대기중'")
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ───────────────────────── 초안 ─────────────────────────
+
+@route("POST", "/api/drafts/save")
+def drafts_save(h, q, b):
+    content = (b.get("content") or "").strip()
+    if not content:
+        raise ApiError("내용이 비어 있습니다.")
+    conn = db.connect()
+    status = b.get("status") or "초안"
+    if status == "확정":
+        conn.execute("UPDATE drafts SET status='초안' WHERE student_id=? AND status='확정'", (int(b["student_id"]),))
+    if b.get("id") and not b.get("as_new"):
+        conn.execute("UPDATE drafts SET content=?, bytes=?, status=? WHERE id=?",
+                     (content, db.neis_bytes(content), status, int(b["id"])))
+    else:
+        conn.execute("INSERT INTO drafts(student_id, content, bytes, status) VALUES (?,?,?,?)",
+                     (int(b["student_id"]), content, db.neis_bytes(content), status))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@route("POST", "/api/drafts/delete")
+def drafts_delete(h, q, b):
+    conn = db.connect()
+    conn.execute("DELETE FROM drafts WHERE id=?", (int(b["id"]),))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ───────────────────────── 설정 ─────────────────────────
+
+def _mask(k):
+    return (k[:4] + "•" * 8 + k[-4:]) if len(k) > 10 else ("•" * len(k))
+
+
+@route("GET", "/api/settings")
+def settings_get(h, q, b):
+    s = db.get_settings()
+    s["gemini_api_key_masked"] = _mask(s.get("gemini_api_key", ""))
+    s["has_key"] = bool(s.get("gemini_api_key"))
+    s.pop("gemini_api_key", None)
+    s["inbox_exists"] = os.path.isdir(os.path.expanduser(s.get("inbox_dir") or ""))
+    s["data_dir"] = db.DATA_DIR
+    return s
+
+
+@route("POST", "/api/settings")
+def settings_save(h, q, b):
+    vals = dict(b)
+    if "gemini_api_key" in vals and ("•" in vals["gemini_api_key"] or not vals["gemini_api_key"].strip()):
+        if not vals.get("clear_key"):
+            vals.pop("gemini_api_key")
+    if vals.get("clear_key"):
+        vals["gemini_api_key"] = ""
+    if "gemini_api_key" in vals:
+        vals["gemini_api_key"] = vals["gemini_api_key"].strip()
+    db.set_settings(vals)
+    return {"ok": True}
+
+
+@route("POST", "/api/settings/test")
+def settings_test(h, q, b):
+    key = (b.get("key") or "").strip()
+    if not key or "•" in key:
+        key = db.get_settings().get("gemini_api_key", "")
+    if not key:
+        raise ApiError("API 키를 입력하세요.")
+    try:
+        models = gemini.list_models(key)
+    except gemini.GeminiError as e:
+        raise ApiError(str(e))
+    return {"ok": True, "models": models}
+
+
+@route("POST", "/api/inbox/scan")
+def inbox_scan(h, q, b):
+    return watcher.scan_once()
+
+
+@route("POST", "/api/inbox/create")
+def inbox_create(h, q, b):
+    folder = os.path.expanduser(db.get_settings().get("inbox_dir") or "")
+    if not folder:
+        raise ApiError("수신 폴더 경로를 입력하세요.")
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError as e:
+        raise ApiError("폴더를 만들 수 없습니다: %s" % e)
+    open_in_finder(folder)
+    return {"ok": True}
+
+
+@route("POST", "/api/open_data")
+def open_data(h, q, b):
+    open_in_finder(db.DATA_DIR)
+    return {"ok": True}
+
+
+@route("POST", "/api/backup")
+def backup_now(h, q, b):
+    path = os.path.join(db.BACKUP_DIR, "seteuk-manual-%s.db" % datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    db.backup_to(path)
+    open_in_finder(path, reveal=True)
+    return {"ok": True, "path": path}
+
+
+# ───────────────────────── 내보내기 ─────────────────────────
+
+@route("GET", "/api/export/table")
+def export_table(h, q, b):
+    conn = db.connect()
+    label, rows = sheets.class_table(conn, int(q["class_id"]))
+    conn.close()
+    return {"label": label, "header": sheets.HEADER, "rows": rows,
+            "tsv": sheets.to_tsv(sheets.HEADER[:6], [r[:6] for r in rows])}
+
+
+@route("POST", "/api/export/sheets")
+def export_sheets(h, q, b):
+    conn = db.connect()
+    label, rows = sheets.class_table(conn, int(b["class_id"]))
+    settings = db.get_settings(conn)
+    conn.close()
+    res = sheets.send_to_sheets(settings.get("sheets_url"), settings.get("sheets_token"), label, sheets.HEADER, rows)
+    return {"ok": True, "count": res.get("count", len(rows)), "sheet": label}
+
+
+# ───────────────────────── 가져오기 경로 ─────────────────────────
+
+@route("GET", "/api/sources")
+def sources_status(h, q, b):
+    s = db.get_settings()
+    vm_state, vm_dir = watcher.voicememo_access()
+    conn = db.connect()
+    counts = {r["source"]: r["n"] for r in db.rows(conn, "SELECT source, COUNT(*) AS n FROM imported "
+                                                          "WHERE sig != 'skip' GROUP BY source")}
+    conn.close()
+    return {
+        "inbox": {"dir": s["inbox_dir"], "exists": os.path.isdir(os.path.expanduser(s["inbox_dir"] or ""))},
+        "voicememo": {"enabled": s["voicememo_enabled"] == "1", "access": vm_state, "dir": vm_dir,
+                      "since": s["voicememo_since"], "keyword": s["voicememo_keyword"],
+                      "count": counts.get("voicememo", 0)},
+        "notes": {"enabled": s["notes_enabled"] == "1", "folder": s["notes_folder"], "count": counts.get("notes", 0)},
+        "status": watcher.status(),
+        "app_name": "세특도우미" if os.environ.get("SETEUK_APP") else "터미널",
+    }
+
+
+@route("POST", "/api/sources/voicememo")
+def sources_voicememo(h, q, b):
+    vals = {"voicememo_enabled": "1" if b.get("enabled") else "0"}
+    if "keyword" in b:
+        vals["voicememo_keyword"] = (b.get("keyword") or "").strip()
+    if b.get("enabled") and (b.get("reset_since") or not db.get_settings().get("voicememo_since")):
+        # 켜는 날 0시 이후 녹음부터 가져옴 (예전 개인 녹음은 가져오지 않음)
+        vals["voicememo_since"] = datetime.date.today().strftime("%Y-%m-%d 00:00")
+    if b.get("since"):
+        vals["voicememo_since"] = b["since"].replace("T", " ")[:16]
+    db.set_settings(vals)
+    return {"ok": True, "access": watcher.voicememo_access()[0]}
+
+
+@route("POST", "/api/sources/notes")
+def sources_notes(h, q, b):
+    db.set_settings({"notes_enabled": "1" if b.get("enabled") else "0",
+                     "notes_folder": (b.get("folder") or "세특").strip()})
+    if not b.get("enabled"):
+        return {"ok": True}
+    try:
+        notes = watcher.read_notes((b.get("folder") or "세특").strip())  # 처음이면 권한 요청 창이 뜸
+    except PermissionError as e:
+        raise ApiError(str(e))
+    except Exception as e:  # noqa
+        raise ApiError("메모 앱을 읽지 못했습니다: %s" % e)
+    return {"ok": True, "found": len(notes)}
+
+
+@route("POST", "/api/open_privacy")
+def open_privacy(h, q, b):
+    panes = {"fda": "Privacy_AllFiles", "automation": "Privacy_Automation"}
+    pane = panes.get(b.get("pane"), "Privacy_AllFiles")
+    subprocess.Popen(["open", "x-apple.systempreferences:com.apple.preference.security?" + pane])
+    return {"ok": True}
+
+
+# ───────────────────────── 업데이트 ─────────────────────────
+
+@route("GET", "/api/version")
+def version_info(h, q, b):
+    return {"version": version.VERSION, "repo": version.UPDATE_REPO, "code_dir": db.APP_DIR}
+
+
+@route("GET", "/api/update/check")
+def update_check(h, q, b):
+    if db.get_settings().get("update_check") != "1" and not q.get("force"):
+        return {"enabled": False, "current": version.VERSION}
+    return update.check(force=bool(q.get("force")))
+
+
+@route("POST", "/api/update/apply")
+def update_apply(h, q, b):
+    conn = db.connect()
+    busy = conn.execute("SELECT COUNT(*) FROM jobs WHERE status='진행중'").fetchone()[0]
+    conn.close()
+    if busy:
+        raise ApiError("AI 작업이 진행 중입니다. 끝난 뒤 업데이트하세요.")
+    db.backup_to(os.path.join(db.BACKUP_DIR, "seteuk-before-update-%s.db" % datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
+    return update.apply()
+
+
+@route("POST", "/api/shutdown")
+def shutdown(h, q, b):
+    threading.Timer(0.5, lambda: os._exit(0)).start()
+    return {"ok": True}
+
+
+# ───────────────────────── HTTP 처리 ─────────────────────────
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "Seteuk/1.0"
+
+    def log_message(self, fmt, *args):
+        if "/api/jobs" in (args[0] if args else ""):
+            return
+        sys.stderr.write("%s %s\n" % (self.log_date_time_string(), fmt % args))
+
+    def _send(self, code, payload, ctype="application/json; charset=utf-8", extra=None):
+        data = payload if isinstance(payload, bytes) else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def _host_ok(self):
+        return self.headers.get("Host", "") in ALLOWED_HOSTS
+
+    def do_GET(self):
+        self._dispatch("GET")
+
+    def do_POST(self):
+        self._dispatch("POST")
+
+    def _dispatch(self, method):
+        if not self._host_ok():
+            return self._send(403, {"error": "forbidden host"})
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        q = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query).items()}
+        if method == "GET" and not path.startswith("/api/"):
+            if path.startswith("/audio/"):
+                return self._serve_audio(path)
+            if path.startswith("/export/csv"):
+                return self._serve_csv(q)
+            return self._serve_static(path)
+        if method == "POST" and self.headers.get("X-Seteuk") != "1":
+            return self._send(403, {"error": "missing header"})
+        for m, rx, fn in ROUTES:
+            if m != method:
+                continue
+            match = rx.match(path)
+            if not match:
+                continue
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(length) if length else b""
+                if method == "POST" and path != "/api/recordings/upload":
+                    body = json.loads(raw.decode("utf-8") or "{}")
+                else:
+                    body = raw
+                res = fn(self, q, body, *match.groups())
+                return self._send(200, res)
+            except ApiError as e:
+                return self._send(e.code, {"error": str(e)})
+            except (ValueError, KeyError, gemini.GeminiError) as e:
+                return self._send(400, {"error": str(e)})
+            except Exception as e:  # noqa
+                traceback.print_exc()
+                return self._send(500, {"error": "서버 오류: %s" % e})
+        self._send(404, {"error": "not found"})
+
+    def _serve_static(self, path):
+        if path in ("", "/"):
+            path = "/index.html"
+        if path == "/google_apps_script.gs":
+            with open(os.path.join(db.APP_DIR, "google_apps_script.gs"), "rb") as f:
+                return self._send(200, f.read(), "text/plain; charset=utf-8")
+        full = os.path.normpath(os.path.join(STATIC_DIR, path.lstrip("/")))
+        if not full.startswith(STATIC_DIR) or not os.path.isfile(full):
+            full = os.path.join(STATIC_DIR, "index.html")
+        ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+        if ctype.startswith("text/") or ctype in ("application/javascript",):
+            ctype += "; charset=utf-8"
+        with open(full, "rb") as f:
+            self._send(200, f.read(), ctype)
+
+    def _serve_csv(self, q):
+        conn = db.connect()
+        try:
+            label, rows = sheets.class_table(conn, int(q.get("class_id", 0)))
+        except Exception as e:  # noqa
+            conn.close()
+            return self._send(400, {"error": str(e)})
+        conn.close()
+        data = sheets.to_csv(sheets.HEADER, rows).encode("utf-8")
+        fname = urllib.parse.quote("세특_%s_%s.csv" % (label, datetime.date.today().isoformat()))
+        self._send(200, data, "text/csv; charset=utf-8",
+                   {"Content-Disposition": "attachment; filename*=UTF-8''%s" % fname})
+
+    def _serve_audio(self, path):
+        rid = _int(path.rsplit("/", 1)[-1])
+        conn = db.connect()
+        r = db.row(conn, "SELECT audio_path FROM recordings WHERE id=?", (rid,))
+        conn.close()
+        if not r or not r["audio_path"] or not os.path.exists(r["audio_path"]):
+            return self._send(404, {"error": "no audio"})
+        fp = r["audio_path"]
+        size = os.path.getsize(fp)
+        ctype = mimetypes.guess_type(fp)[0] or "audio/mp4"
+        if fp.lower().endswith(".m4a"):
+            ctype = "audio/mp4"
+        start, end = 0, size - 1
+        rng = self.headers.get("Range")
+        code = 200
+        if rng:
+            m = re.match(r"bytes=(\d*)-(\d*)", rng)
+            if m:
+                if m.group(1):
+                    start = int(m.group(1))
+                    if m.group(2):
+                        end = min(int(m.group(2)), size - 1)
+                elif m.group(2):
+                    start = max(0, size - int(m.group(2)))
+                code = 206
+        length = end - start + 1
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(length))
+        if code == 206:
+            self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
+        self.end_headers()
+        with open(fp, "rb") as f:
+            f.seek(start)
+            left = length
+            try:
+                while left > 0:
+                    chunk = f.read(min(65536, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+
+def main():
+    db.init()
+    try:
+        httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+    except OSError:
+        print("이미 실행 중입니다. 브라우저를 엽니다.")
+        webbrowser.open("http://%s:%d" % (HOST, PORT))
+        return
+    httpd.daemon_threads = True
+    pipeline.start_worker()
+    watcher.start()
+    url = "http://%s:%d" % (HOST, PORT)
+    print("세특도우미 %s 실행 중: %s  (코드: %s, 데이터: %s)" % (version.VERSION, url, db.APP_DIR, db.DATA_DIR))
+    if os.environ.get("SETEUK_NO_BROWSER") != "1":
+        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()
