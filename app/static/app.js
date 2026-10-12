@@ -1183,7 +1183,7 @@ async function renderSources() {
         <label class="switch"><input type="checkbox" id="vm-on" ${vm.enabled ? 'checked' : ''}> 사용</label></div>
       <p>아이폰 <b>음성메모</b>로 녹음만 하면 끝. 저장·공유·파일 이름 정하기가 필요 없습니다. iCloud로 이 맥에 넘어온 녹음을 자동으로 가져옵니다.
         아이폰이 이미 받아쓴 전사문이 있으면 그대로 써서 AI 전사도 건너뜁니다.</p>
-      ${vm.enabled && vm.access === 'no_permission' ? `<div class="warn">맥이 음성메모 보관함을 막고 있습니다. <b>시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한</b>에서 <b>${esc(appName)}</b>을 켜 주세요. 켠 뒤 쓰담을 껐다 켜야 적용됩니다.
+      ${vm.enabled && vm.access === 'no_permission' ? `<div class="warn">맥이 음성메모 보관함을 막고 있습니다. <b>시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한</b>에서 목록 아래 <b>＋</b> 버튼 → <b>응용 프로그램</b> → <b>${esc(appName)}</b>을 골라 추가하고 스위치를 켜 주세요. (맥은 처음엔 목록에 보이지 않아 직접 추가해야 해요) 켠 뒤 쓰담을 ⌘Q로 껐다 켜야 적용됩니다.
         <div style="margin-top:6px"><button class="sm" id="vm-perm">설정 화면 열기</button></div></div>` : ''}
       ${vm.enabled && vm.access === 'not_found' ? `<div class="warn">이 맥에서 음성메모 보관함을 찾지 못했습니다. 맥의 <b>음성 메모</b> 앱을 한 번 열고, 아이폰과 맥 모두 <b>설정 → [내 이름] → iCloud → 음성 메모</b>가 켜져 있는지 확인하세요.</div>` : ''}
       ${vm.enabled ? `<div class="row" style="margin-top:10px">
@@ -1194,7 +1194,7 @@ async function renderSources() {
       <details style="margin-top:8px"><summary class="small">처음 설정 방법</summary><ol class="small">
         <li>아이폰: <b>설정 → [내 이름] → iCloud → 모두 보기 → 음성 메모</b> 켜기</li>
         <li>맥: <b>시스템 설정 → [내 이름] → iCloud → 음성 메모</b> 켜기, 맥의 <b>음성 메모</b> 앱을 한 번 열어 동기화 확인</li>
-        <li>위 <b>사용</b> 체크 → 안내에 따라 <b>전체 디스크 접근 권한</b> 허용 → 쓰담 다시 실행</li></ol></details>
+        <li>위 <b>사용</b> 체크 → <b>전체 디스크 접근 권한</b> 화면에서 <b>＋</b> 눌러 <b>쓰담</b> 추가·켜기 → 쓰담 다시 실행</li><li>쓰담 앱으로 녹음하면 이 권한 없이도 자동으로 넘어와요 (음성메모 앱을 쓸 때만 필요)</li></ol></details>
     </div>
     <div class="source">
       <div class="source-head"><h3>② 메모 앱 받아쓰기 <span class="badge green">AI 키 없이 무료 전사</span> ${nt.enabled ? '<span class="badge green">작동 중</span>' : ''}</h3>
