@@ -265,10 +265,9 @@ struct EntryDetail: View {
             HStack {
                 Label("받아쓴 글", systemImage: "text.bubble.fill").font(Theme.font(15, .semibold))
                 Spacer()
-                if current.stt == .failed || current.stt == .unavailable || (current.stt == .done && current.transcript.isEmpty) {
-                    if !sent && Transcriber.supported {
-                        Button("다시 받아쓰기") { store.transcribe(current) }.font(Theme.font(13, .semibold))
-                    }
+                if current.stt != .working {
+                    // 받아쓰기 엔진이 좋아졌을 때 예전 녹음도 다시 받아쓸 수 있게 (학생별 조각도 다시 나눔)
+                    Button("다시 받아쓰기") { transcript = ""; store.transcribe(current, resplit: true) }.font(Theme.font(13, .semibold))
                 }
             }
             switch current.stt {

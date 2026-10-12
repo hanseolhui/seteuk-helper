@@ -214,7 +214,7 @@ final class Store: ObservableObject {
 
     // MARK: 받아쓰기
     /// 녹음을 아이폰 안에서 글자로 바꾸고, 받아쓴 글을 m4a에 넣어 둔다 (보내기는 끝날 때까지 기다림)
-    func transcribe(_ e: Entry) {
+    func transcribe(_ e: Entry, resplit: Bool = false) {
         guard var cur = items.first(where: { $0.id == e.id }), cur.isAudio else { return }
         cur.stt = .working; cur.sttNote = ""
         update(cur)
@@ -239,7 +239,7 @@ final class Store: ObservableObject {
                         now.splitNames = r.names; now.splitLeftover = r.leftover; now.splitUnsure = r.unsure
                         update(now)
                     } else {
-                        splitToStudents(now, text: now.transcript)
+                        splitToStudents(now, text: now.transcript, force: resplit)
                     }
                 }
                 now = items.first(where: { $0.id == e.id }) ?? now
