@@ -24,10 +24,6 @@
 	<string>수업 중 학생 관찰 내용을 녹음하기 위해 마이크를 사용합니다.</string>
 	<key>WKApplication</key>
 	<true/>
-	<key>WKBackgroundModes</key>
-	<array>
-		<string>audio</string>
-	</array>
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>kr.sseudam.app</string>
 </dict>
