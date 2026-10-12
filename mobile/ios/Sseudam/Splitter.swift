@@ -94,6 +94,27 @@ enum Splitter {
                                     if !acc.contains(where: { room($0) == room(c) }) { acc.append(c) } }.map(\.uid) : []))
             }
         }
+        // 받아쓰기가 이름을 살짝 틀리게 적은 경우 ("김민쑤", "김밍수") — 성이 같고 자모 하나만 다르면
+        // 그 학생으로 담되 '확인'을 붙인다 (선생님이 한 번 보고 넘어가게)
+        var fuzzyNames: [String: SStudent] = [:]
+        for (n, s) in keys where n.count == 3 && n == s.displayName { fuzzyNames[n] = s }
+        if !fuzzyNames.isEmpty {
+            let wordRx = try! NSRegularExpression(pattern: #"[가-힣]{3,6}"#)
+            for m in wordRx.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+                let start = charIndex(text, m.range.location)
+                guard !taken(start) else { continue }
+                let core = String(ns.substring(with: m.range).prefix(3))   // 조사 등 뒤는 버림
+                guard fuzzyNames[core] == nil else { continue }
+                let near = fuzzyNames.filter { $0.key.first == core.first && jamoDistance($0.key, core) == 1 }
+                guard near.count == 1, let name = near.first?.key else { continue }
+                let cands = (byName[name] ?? []).sorted { rank($0) < rank($1) }
+                let ctx = contextClass(at: start)
+                guard let pick = cands.first(where: { $0.class_uid == ctx?.uid }) ?? cands.first else { continue }
+                hits.append(Hit(start: start, end: start + 3, student: pick, ambiguous: true,
+                                candidates: cands.reduce(into: [SStudent]()) { acc, c in
+                                    if !acc.contains(where: { room($0) == room(c) }) { acc.append(c) } }.map(\.uid)))
+            }
+        }
         // "N번" — 지금 말하는 반이 있을 때만
         let numRx = try! NSRegularExpression(pattern: #"(?:^|[\s.,])(\d{1,2})\s*번(?=[\s,.]|$)"#)
         for m in numRx.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
@@ -132,6 +153,29 @@ enum Splitter {
         }
         let lead = squash(String(chars[0..<max(0, starts[0])]))
         return Result(blocks: out, leftover: lead.count >= 6 ? lead : "")
+    }
+
+    /// 한글 자모 단위 편집 거리 (초성·중성·종성)
+    static func jamoDistance(_ a: String, _ b: String) -> Int {
+        func jamo(_ s: String) -> [Int] {
+            s.unicodeScalars.flatMap { u -> [Int] in
+                let v = Int(u.value)
+                guard (0xAC00...0xD7A3).contains(v) else { return [v] }
+                let i = v - 0xAC00
+                return [1000 + i / 588, 2000 + (i % 588) / 28, 3000 + i % 28]
+            }
+        }
+        let x = jamo(a), y = jamo(b)
+        var d = Array(0...y.count)
+        for i in 1...max(1, x.count) where !x.isEmpty {
+            var prev = d[0]; d[0] = i
+            for j in 1...max(1, y.count) where !y.isEmpty {
+                let t = d[j]
+                d[j] = min(d[j] + 1, d[j - 1] + 1, prev + (x[i - 1] == y[j - 1] ? 0 : 1))
+                prev = t
+            }
+        }
+        return d[y.count]
     }
 
     private static func sentenceStart(_ chars: [Character], _ pos: Int) -> Int {

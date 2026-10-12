@@ -172,6 +172,17 @@ final class DataStore: ObservableObject {
     func notes(forSource source: String) -> [SNote] { notes.filter { !$0.isDeleted && $0.source == source } }
     func student(_ uid: String?) -> SStudent? { students.first { $0.uid == uid } }
     var hasRoster: Bool { students.contains { !$0.isDeleted } }
+    /// 받아쓰기 힌트용 이름 (이름 + 별칭), 최근 학기 반부터
+    var rosterNames: [String] {
+        var out: [String] = []
+        for c in activeClasses {
+            for s in students(in: c) {
+                let names = [s.displayName] + (s.aliases ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                for n in names where n.count >= 2 && !out.contains(n) { out.append(n) }
+            }
+        }
+        return Array(out.prefix(100))
+    }
 
     // MARK: 고치기
     static func isoDaysAgo(_ n: Int) -> String {

@@ -212,7 +212,8 @@ final class Store: ObservableObject {
         Task {
             let bg = UIApplication.shared.beginBackgroundTask(withName: "stt")
             defer { UIApplication.shared.endBackgroundTask(bg) }
-            let outcome = await Transcriber.transcribe(url(cur))
+            // 명단 이름을 받아쓰기에 미리 알려 주면 이름을 훨씬 정확히 적는다
+            let outcome = await Transcriber.transcribe(url(cur), hints: DataStore.shared.rosterNames)
             guard var now = items.first(where: { $0.id == e.id }) else { return }
             switch outcome {
             case .text(let t):
