@@ -27,6 +27,11 @@ struct Entry: Codable, Identifiable, Equatable {
     var sttNote: String = ""
     /// 컴퓨터의 쓰담이 실제로 가져갔는지 (iCloud '처리완료' 폴더로 확인)
     var received: Bool = false
+    /// 폰에서 학생별로 나눈 결과 (이름들). nil = 아직 안 나눔
+    var splitNames: [String]? = nil
+    /// 학생 이름을 못 찾은 앞부분 (선생님이 학생을 골라 줄 수 있게)
+    var splitLeftover: String = ""
+    var splitUnsure: Int = 0
 
     var isAudio: Bool { type == "audio" }
     var editableUntil: Date { (savedAt ?? createdAt).addingTimeInterval(Store.grace) }
@@ -62,6 +67,9 @@ struct Entry: Codable, Identifiable, Equatable {
         stt = try c.decodeIfPresent(SttState.self, forKey: .stt) ?? .none
         sttNote = try c.decodeIfPresent(String.self, forKey: .sttNote) ?? ""
         received = try c.decodeIfPresent(Bool.self, forKey: .received) ?? false
+        splitNames = try c.decodeIfPresent([String].self, forKey: .splitNames)
+        splitLeftover = try c.decodeIfPresent(String.self, forKey: .splitLeftover) ?? ""
+        splitUnsure = try c.decodeIfPresent(Int.self, forKey: .splitUnsure) ?? 0
     }
 }
 
@@ -211,6 +219,9 @@ final class Store: ObservableObject {
                 now.transcript = t.trimmingCharacters(in: .whitespacesAndNewlines)
                 now.stt = .done
                 if !now.transcript.isEmpty && !now.sent { _ = await Transcriber.embed(now.transcript, into: url(now)) }
+                update(now)
+                if !now.transcript.isEmpty { splitToStudents(now, text: now.transcript) }
+                now = items.first(where: { $0.id == e.id }) ?? now
             case .unavailable(let m): now.stt = .unavailable; now.sttNote = m
             case .failed(let m): now.stt = .failed; now.sttNote = m
             }
@@ -227,7 +238,38 @@ final class Store: ObservableObject {
         lastKind = kind
         let fileName = uniqueFile(baseName(date: date, kind: kind, memo: "", suffix: "메모"), "txt")
         try? t.data(using: .utf8)?.write(to: Store.folder.appendingPathComponent(fileName))
-        return newEntry(Entry(type: "text", fileName: fileName, createdAt: date, kind: kind, text: t))
+        let e = newEntry(Entry(type: "text", fileName: fileName, createdAt: date, kind: kind, text: t))
+        splitToStudents(e, text: t)
+        return items.first { $0.id == e.id }
+    }
+
+    /// 명단이 있으면 폰에서 바로 학생별 기록으로 나눈다 (맥이 같은 녹음을 받으면 다시 나누지 않고 연결만 함)
+    func splitToStudents(_ e: Entry, text: String, force: Bool = false) {
+        let data = DataStore.shared
+        guard force || data.splitOnPhone, data.hasRoster, var cur = items.first(where: { $0.id == e.id }) else { return }
+        let r = data.split(text: text, date: cur.createdAt, kind: cur.kind, source: cur.fileName, hint: cur.memo, force: force)
+        cur.splitNames = r.names
+        cur.splitLeftover = r.leftover
+        cur.splitUnsure = r.unsure
+        update(cur)
+    }
+
+    /// 이름 없는 부분이 학생 이야기가 아니면 치우기 (원본 글은 그대로 남음)
+    func dropLeftover(_ e: Entry) {
+        guard var cur = items.first(where: { $0.id == e.id }) else { return }
+        cur.splitLeftover = ""
+        update(cur)
+    }
+
+    /// 학생을 못 찾은 부분을 선생님이 고른 학생에게 담기
+    func assignLeftover(_ e: Entry, to s: SStudent) {
+        guard var cur = items.first(where: { $0.id == e.id }), !cur.splitLeftover.isEmpty else { return }
+        DataStore.shared.addNote(s, content: cur.splitLeftover, date: cur.createdAt, kind: cur.kind, source: cur.fileName)
+        cur.splitLeftover = ""
+        var names = cur.splitNames ?? []
+        if !names.contains(s.displayName) { names.insert(s.displayName, at: 0) }
+        cur.splitNames = names
+        update(cur)
     }
 
     /// 유형·메모 바꾸기. 아직 보내기 전이면 파일 이름도 바꿔 컴퓨터가 올바로 알아듣게 한다.

@@ -22,6 +22,7 @@ import pipeline  # noqa: E402
 import platform_util  # noqa: E402
 import prompts  # noqa: E402
 import sheets  # noqa: E402
+import sync_text  # noqa: E402
 import update  # noqa: E402
 import version  # noqa: E402
 import watcher  # noqa: E402
@@ -945,6 +946,18 @@ def open_privacy(h, q, b):
 
 # ───────────────────────── 업데이트 ─────────────────────────
 
+@route("GET", "/api/sync/text")
+def sync_text_status(h, q, b):
+    return sync_text.status()
+
+
+@route("POST", "/api/sync/text")
+def sync_text_set(h, q, b):
+    if "enabled" in b:
+        db.set_settings({"text_sync": "1" if b["enabled"] else "0"})
+    return sync_text.sync_once()
+
+
 @route("GET", "/api/version")
 def version_info(h, q, b):
     return {"version": version.VERSION, "repo": version.UPDATE_REPO, "code_dir": db.APP_DIR,
@@ -1152,6 +1165,7 @@ def main():
     pipeline.start_worker()
     watcher.start()
     sheets.start()
+    sync_text.start()
     url = "http://%s:%d" % (HOST, PORT)
     print("쓰담 %s 실행 중: %s  (코드: %s, 데이터: %s)" % (version.VERSION, url, db.APP_DIR, db.DATA_DIR))
     if os.environ.get("SETEUK_NO_BROWSER") != "1":

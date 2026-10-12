@@ -13,7 +13,7 @@ struct OnboardingView: View {
                       example: nil).tag(0)
                 slide(mood: .listening, title: "이렇게 말하면\n학생별로 정리돼요",
                       text: "학년·반·이름을 먼저 말하면 컴퓨터가\n알아서 그 학생 기록으로 넣어요.",
-                      example: "“2학년 3반 김민수, 토론에서 근거를\n세 가지 들어 반론을 폈음”").tag(1)
+                      example: "“2학년 3반 김민수!\n토론에서 근거 세 개로 반론을 척척 🙌”").tag(1)
                 slide(mood: .calm, title: "학기말엔\n초안까지 한 번에",
                       text: "모인 기록으로 세특·행동특성·창체 초안을\n만들고 NEIS 글자 수도 맞춰 줘요.",
                       example: nil).tag(2)
@@ -88,8 +88,8 @@ struct TipsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     tip("1", "학년·반·이름 먼저", "“2학년 3반 김민수, …”처럼 말하면 컴퓨터가 그 학생에게 바로 넣어요. 같은 반이면 이름만 말해도 돼요.", Theme.blue)
-                    tip("2", "있었던 일 그대로", "‘무엇을 했는지 + 어땠는지’를 짧게. 예) “발표에서 자료 세 개로 근거를 댐, 친구 질문에도 차분히 답함”", Theme.lavender)
-                    tip("3", "여러 학생을 한 번에", "한 녹음에 여러 학생을 이어서 말해도 돼요. 이름이 나오는 곳에서 알아서 나눠요.", Theme.mint)
+                    tip("2", "있었던 일 그대로", "‘무엇을 했는지 + 어땠는지’를 짧게 쏙! 예) “발표 자료를 세 개나 챙겨 왔고, 친구 질문에도 차분차분 답했어요 🌷”", Theme.lavender)
+                    tip("3", "여러 학생을 한 번에", "한 녹음에 여러 학생을 이어서 말해도 돼요. 이름이 나오는 곳에서 알아서 나누고, 잘못 나뉜 건 칩을 톡 눌러 바로잡으면 돼요.", Theme.mint)
                     tip("4", "상담은 ‘상담’으로", "상담 기록은 유형을 ‘상담’으로 두면 담임 기록(행동특성)으로 정리돼요.", Theme.coral)
                     tip("5", "말하기 어려우면 한 줄로", "‘한 줄로 남기기’에 적거나 키보드의 🎤로 받아쓰기해도 똑같이 정리돼요.", Theme.butter)
                     VStack(alignment: .leading, spacing: 8) {

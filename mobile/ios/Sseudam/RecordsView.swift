@@ -201,6 +201,9 @@ struct EntryDetail: View {
                 .frame(maxWidth: .infinity).card(padding: 22)
 
                 if current.isAudio { transcriptCard }
+                if !current.isAudio || current.stt == .done || !current.transcript.isEmpty {
+                    RecordingSplitSection(entry: current)
+                }
 
                 VStack(alignment: .leading, spacing: 12) {
                     HStack { Text("유형").font(Theme.font(15, .semibold)); Spacer(); KindPicker(kind: $kind).disabled(sent) }

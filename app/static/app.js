@@ -1210,6 +1210,7 @@ async function renderSources() {
         <li>사용 팁: 메모 제목에 <b>2-3</b> 같은 학급을 쓰거나, 시간표를 채워 두면 학급이 자동 지정됩니다</li></ol></details>
     </div>
 ` : '<p class="muted small">아이폰 음성메모·메모 앱 자동 가져오기는 맥에서만 됩니다. 윈도우에서는 휴대폰 \'쓰담\' 앱(아래)이나 iCloud 폴더를 쓰세요.</p>') + `
+    <div class="source" id="ts-box"></div>
     <div class="source">
       <div class="source-head"><h3>AirDrop · 퀵 셰어로 받기 <span class="badge blue">맥·윈도우</span> ${src.downloads.enabled ? '<span class="badge green">작동 중</span>' : ''}</h3>
         <label class="switch"><input type="checkbox" id="dl-on" ${src.downloads.enabled ? 'checked' : ''}> 사용</label></div>
@@ -1227,6 +1228,7 @@ async function renderSources() {
     if ($('#vm-on').checked && r.access === 'no_permission') toast('전체 디스크 접근 권한이 필요합니다. 안내를 따라 주세요.', true);
     renderSources();
   };
+  renderTextSync();
   $('#dl-on').onchange = async e => { await api('/api/settings', { downloads_import: e.target.checked ? '1' : '0', downloads_since: '' }); renderSources(); };
   if (!mac) { $('#inbox-open').onclick = async () => { await api('/api/inbox/create', {}); renderSources(); }; return; }
   $('#vm-on').onchange = () => setVM();
@@ -1431,3 +1433,20 @@ updatePending();
 setInterval(updatePending, 30000);
 router(false);
 pollJobs();
+
+
+// 휴대폰·다른 기기와 글 기록 맞추기 (녹음은 빼고 학급·학생·관찰기록·초안만)
+async function renderTextSync() {
+  const box = $('#ts-box'); if (!box) return;
+  const st = await api('/api/sync/text');
+  const on = st.state !== '꺼짐';
+  const last = st.last ? new Date(st.last * 1000).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '';
+  const badge = st.state === '정상' ? '<span class="badge green">작동 중</span>' : st.state === '오류' ? '<span class="badge red">오류</span>' : '';
+  box.innerHTML = `<div class="source-head"><h3>휴대폰과 기록 맞추기 <span class="badge blue">글만 · 녹음 제외</span> ${badge}</h3>
+      <label class="switch"><input type="checkbox" id="ts-on" ${on ? 'checked' : ''}> 사용</label></div>
+    <p>같은 Apple ID의 아이폰·아이패드 쓰담과 <b>학급·학생 명단·학생별 기록·초안</b>을 주고받습니다. 맥에서 정리하면 폰에서도 보이고, 폰에서 고친 것도 맥에 들어와요. 녹음 파일은 오가지 않아요.</p>
+    <p class="muted small">${st.state === 'iCloud 쓰담 폴더 없음' ? '아이폰에 쓰담 앱을 설치하고 한 번 열면 iCloud 폴더가 생겨요.' :
+      st.state === '정상' ? `마지막으로 맞춘 시각 ${last}${st.devices && st.devices.length ? ' · 함께 쓰는 기기: ' + st.devices.map(esc).join(', ') : ' · 아직 다른 기기 없음'}` :
+      st.state === '오류' ? '오류: ' + esc(st.error || '') : esc(st.state || '')}</p>`;
+  $('#ts-on').onchange = async e => { await api('/api/sync/text', { enabled: e.target.checked }); renderTextSync(); };
+}

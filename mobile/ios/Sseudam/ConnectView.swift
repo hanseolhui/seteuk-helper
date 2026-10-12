@@ -17,6 +17,7 @@ struct ConnectView: View {
                     if store.autoSend && !store.computerSeen { waitingCard }
                     if store.computer == "mac" { macCards } else { windowsCards }
                     sttCard
+                    lockCard
                     keepCard
                     linksCard
                 }
@@ -59,6 +60,19 @@ struct ConnectView: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 11)
                     .background(Theme.butter, in: Capsule()).foregroundStyle(.white)
             }.buttonStyle(Squishy())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+    }
+
+    /// 앱 잠금
+    var lockCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(get: { AppLock.shared.enabled }, set: { v in Task { await AppLock.shared.setEnabled(v); store.objectWillChange.send() } })) {
+                Label("\(AppLock.shared.biometryName)로 잠그기", systemImage: "lock.fill").font(Theme.font(16, .bold))
+            }.tint(Theme.mint)
+            Text("휴대폰을 잠깐 빌려줘도 학생 기록은 안 보이게 지켜요. 앱을 나갔다 1분 넘게 지나면 다시 잠기고, 앱 전환 화면에서도 내용을 가려요.")
+                .font(Theme.font(12)).foregroundStyle(Theme.soft).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card()

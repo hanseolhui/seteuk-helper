@@ -317,6 +317,18 @@ def use_whisper(settings):
 def segment_after_transcript(rid, settings=None):
     """전사문이 생긴 뒤: Gemini 키가 있으면 AI 분리, 없으면 이름 기준 규칙 분리."""
     settings = settings or db.get_settings()
+    # 폰에서 이미 학생별로 나눠 보낸 녹음이면 그 기록에 연결만 한다 (같은 내용이 두 번 생기지 않게)
+    conn = db.connect()
+    try:
+        r = db.row(conn, "SELECT original_name FROM recordings WHERE id=?", (rid,))
+        import sync_text
+        if r and sync_text.linked_notes(conn, r.get("original_name")):
+            conn.execute("UPDATE notes SET recording_id=? WHERE source=? AND recording_id IS NULL", (rid, r["original_name"]))
+            conn.execute("UPDATE recordings SET status='확인필요', error='' WHERE id=?", (rid,))
+            conn.commit()
+            return
+    finally:
+        conn.close()
     if ai_ready(settings):
         enqueue("segment", {"recording_id": rid}, "학생별 분리 #%d" % rid)
     else:

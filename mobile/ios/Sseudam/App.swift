@@ -5,15 +5,24 @@ import SwiftUI
 struct SseudamApp: App {
     @StateObject private var store = Store.shared
     @StateObject private var nav = Nav.shared
+    @StateObject private var data = DataStore.shared
+    @StateObject private var lock = AppLock.shared
     @Environment(\.scenePhase) private var phase
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if store.onboarded { RootView() } else { OnboardingView() }
+            ZStack {
+                Group {
+                    if store.onboarded { RootView() } else { OnboardingView() }
+                }
+                if lock.locked || lock.covered {
+                    LockScreen().transition(.opacity).zIndex(1)
+                }
             }
+            .task { if lock.locked { await lock.unlock() } }
             .environmentObject(store)
             .environmentObject(nav)
+            .environmentObject(data)
             .tint(Theme.blue)
             .onOpenURL { url in
                 if let p = Sync.parsePairing(url.absoluteString) {
@@ -23,7 +32,8 @@ struct SseudamApp: App {
             }
         }
         .onChange(of: phase) { p in
-            if p == .active { Task { await store.syncAll() } }
+            lock.phase(p)
+            if p == .active { Task { await store.syncAll(); await data.syncNow() } }
         }
     }
 }
@@ -32,7 +42,7 @@ struct SseudamApp: App {
 @MainActor
 final class Nav: ObservableObject {
     static let shared = Nav()
-    enum Tab: Hashable { case home, records, connect }
+    enum Tab: Hashable { case home, records, students, connect }
     @Published var tab: Tab = .home
     @Published var startRecordingRequest = 0
 }
@@ -51,6 +61,8 @@ struct RootView: View {
                 .tabItem { Label("담기", systemImage: "mic.fill") }
             RecordsView().tag(Nav.Tab.records)
                 .tabItem { Label("기록함", systemImage: "tray.full.fill") }
+            StudentsView().tag(Nav.Tab.students)
+                .tabItem { Label("학생", systemImage: "person.2.fill") }
             ConnectView().tag(Nav.Tab.connect)
                 .tabItem { Label("연결", systemImage: "link") }
         }
@@ -62,6 +74,7 @@ struct RootView: View {
             List {
                 sideItem("담기", "mic.fill", .home)
                 sideItem("기록함", "tray.full.fill", .records)
+                sideItem("학생", "person.2.fill", .students)
                 sideItem("연결", "link", .connect)
             }
             .navigationTitle("쓰담")
@@ -71,6 +84,7 @@ struct RootView: View {
             switch nav.tab {
             case .home: HomeView()
             case .records: RecordsView()
+            case .students: StudentsView()
             case .connect: ConnectView()
             }
         }

@@ -223,6 +223,8 @@ def _migrate_columns(conn):
     new = os.sep + platform_util.APP_NAME + os.sep
     conn.execute("UPDATE recordings SET audio_path = REPLACE(audio_path, ?, ?) WHERE audio_path LIKE ?",
                  (old, new, "%" + old + "%"))
+    import sync_text  # 텍스트 동기화용 uid·source 컬럼
+    sync_text.migrate(conn)
 
 
 def note_area(note, class_kind):

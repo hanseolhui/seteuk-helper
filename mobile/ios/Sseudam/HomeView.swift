@@ -24,18 +24,13 @@ struct HomeView: View {
                     memoCard
                     howCard
                 }
-                .padding(.horizontal, 18).padding(.bottom, 30)
+                .padding(.horizontal, 18).padding(.bottom, 100)
                 .frame(maxWidth: 640)
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
             .softBackground()
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showTips = true } label: { Image(systemName: "questionmark.circle.fill").font(.title3) }
-                        .accessibilityLabel("사용 방법")
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showTips) { TipsView() }
             .alert("마이크 권한이 필요해요", isPresented: $rec.permissionDenied) {
                 Button("설정 열기") { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
@@ -72,6 +67,12 @@ struct HomeView: View {
                 }
             }
             Spacer(minLength: 0)
+            Button { showTips = true } label: {
+                Image(systemName: "questionmark").font(.system(size: 16, weight: .bold)).foregroundStyle(Theme.blue)
+                    .frame(width: 38, height: 38).background(Theme.blue.opacity(0.12), in: Circle())
+            }
+            .buttonStyle(Squishy())
+            .accessibilityLabel("사용 방법")
         }
         .padding(.top, 6)
     }
@@ -133,7 +134,7 @@ struct HomeView: View {
     }
 
     var statusText: String {
-        if !rec.isRecording { return "학년·반·이름을 먼저 말하면 학생별로 쏙 정리돼요\n예) 2학년 3반 김민수, 토론에서 근거를 들어 반론을 폈음" }
+        if !rec.isRecording { return "학년·반·이름부터 말하면 학생별로 쏙쏙 담겨요 ✨\n“2학년 3반 김민수! 근거 세 개로 반론 척척 🙌”" }
         return rec.isPaused ? "잠깐 멈췄어요" : "화면을 꺼도 계속 녹음돼요 · 끝나면 한 번 더 누르세요"
     }
 
@@ -161,7 +162,7 @@ struct HomeView: View {
                 Spacer()
                 KindPicker(kind: $memoKind)
             }
-            TextField("예) 2학년 3반 김민수 발표에서 근거를 세 가지 제시함", text: $memoText, axis: .vertical)
+            TextField("예) 2학년 3반 이서연, 발표 자료를 꼼꼼하게 준비해 옴 🌱", text: $memoText, axis: .vertical)
                 .font(Theme.font(16))
                 .lineLimit(2...5)
                 .focused($memoFocused)
@@ -267,6 +268,22 @@ struct SavedCard: View {
                 }
             }
             if entry.isAudio { TranscriptPreview(entry: entry) }
+            if let names = current.splitNames {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !names.isEmpty {
+                        FlowChips(names: names)
+                    }
+                    if current.splitUnsure > 0 || !current.splitLeftover.isEmpty || names.isEmpty {
+                        NavigationLink { EntryDetail(entry: current, player: Player()) } label: {
+                            Label(names.isEmpty ? "누구 이야기인지 골라 주세요" :
+                                    current.splitUnsure > 0 ? "이름이 같은 학생이 있어요 · 눌러서 확인" : "이름이 안 나온 부분이 있어요 · 눌러서 정리",
+                                  systemImage: "hand.point.up.left.fill")
+                                .font(Theme.font(13, .bold)).foregroundStyle(Theme.butter)
+                        }
+                    }
+                }
+                .transition(.scale(scale: 0.95).combined(with: .opacity))
+            }
             Label(status, systemImage: statusIcon)
                 .font(Theme.font(12)).foregroundStyle(current.received ? Theme.mint : Theme.soft)
         }
@@ -302,6 +319,35 @@ extension SavedCard {
         if e.icloud == .done || e.google == .done { return "icloud.and.arrow.up" }
         if remaining > 0 || e.stt == .working { return "clock" }
         return "iphone"
+    }
+}
+
+/// "담은 학생" 칩 줄 — 하나씩 톡톡 나타남
+struct FlowChips: View {
+    var names: [String]
+    @State private var shown = 0
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.2.fill").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.lavender)
+                ForEach(Array(names.enumerated()), id: \.offset) { i, n in
+                    if i < shown {
+                        Text(n).font(Theme.font(13, .bold)).foregroundStyle(Theme.lavender)
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(Theme.lavender.opacity(0.14), in: Capsule())
+                            .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    }
+                }
+                Text("에게 담았어요").font(Theme.font(12)).foregroundStyle(Theme.soft).opacity(shown >= names.count ? 1 : 0)
+            }
+        }
+        .onAppear {
+            for i in 0..<names.count {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12 * Double(i + 1)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) { shown = i + 1 }
+                }
+            }
+        }
     }
 }
 

@@ -38,6 +38,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>컴퓨터의 쓰담과 연결할 때 QR 코드를 찍기 위해 카메라를 사용합니다.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>앱 잠금을 켜면 학생 기록을 열 때 Face ID로 본인을 확인합니다.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>수업 중 학생 관찰 내용을 녹음하기 위해 마이크를 사용합니다.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
