@@ -240,6 +240,7 @@ struct ClassDetail: View {
         .scrollContentBackground(.hidden)
         .softBackground()
         .navigationTitle(cls.title)
+        .bigBackButton("학생")
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
@@ -306,6 +307,7 @@ struct StudentDetail: View {
         .animation(.spring(response: 0.42, dampingFraction: 0.82), value: data.notes(of: student).map { $0.uid + ($0.content ?? "") })
         .navigationTitle(student.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .bigBackButton(cls?.title ?? "반")
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {

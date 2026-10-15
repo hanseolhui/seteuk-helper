@@ -659,7 +659,7 @@ async function viewRecording(id) {
   const studentOpts = sel => '<option value="">학생 선택…</option>' + d.students.map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${s.number}번 ${esc(s.name)}</option>`).join('');
   const busy = ['대기중', '전사중', '분리중'].includes(r.status);
   view.innerHTML = `
-    <div class="page-head"><div><a href="#/recordings" class="small">← 녹음함</a><h1>${esc(r.title || '녹음')}</h1>
+    <div class="page-head"><div><a href="#/recordings" class="back-btn" aria-label="녹음함으로 돌아가기"><span aria-hidden="true">←</span> 녹음함</a><h1>${esc(r.title || '녹음')}</h1>
       <div>${kindBadge(r.kind)} ${badge(r.status)} <span class="muted small">${esc(fmtDate(r.recorded_at))} · ${esc(r.original_name || '')}</span></div></div>
       <div class="actions">
         ${r.has_audio ? `<button id="b-reveal">Finder에서 보기</button>` : ''}
@@ -883,7 +883,7 @@ async function viewClass(id) {
   const c = d.class;
   const club = c.kind === '동아리';
   view.innerHTML = `
-    <div class="page-head"><div><a href="#/classes" class="small">← 학급 목록</a><h1>${esc(c.label)}</h1><div class="muted">${esc(c.kind || '교과')} · ${c.year}년 ${c.semester}학기 · 학생 ${d.students.length}명 · 기재 영역: ${d.areas.map(a => esc(a.name)).join(', ')}</div></div>
+    <div class="page-head"><div><a href="#/classes" class="back-btn" aria-label="학급 목록으로 돌아가기"><span aria-hidden="true">←</span> 학급 목록</a><h1>${esc(c.label)}</h1><div class="muted">${esc(c.kind || '교과')} · ${c.year}년 ${c.semester}학기 · 학생 ${d.students.length}명 · 기재 영역: ${d.areas.map(a => esc(a.name)).join(', ')}</div></div>
       <div class="actions"><button id="c-copy" title="이 명단으로 다른 학기 학급 만들기">다음 학기로 명단 복사</button><a class="btn" href="#/recordings/${c.id}">이 학급 녹음</a><a class="btn" href="#/drafts/${c.id}">초안</a></div></div>
     <div class="split">
       <div class="card">
@@ -1160,7 +1160,7 @@ async function viewStudent(id, areaParam) {
   const notesInArea = d.notes.filter(n => n.area_eff === area.id);
   const sib = x => `#/student/${x.id}${multi ? '/' + area.id : ''}`;
   view.innerHTML = `
-    <div class="page-head"><div><a href="#/class/${c.id}" class="small">← ${esc(c.label)}</a>
+    <div class="page-head"><div><a href="#/class/${c.id}" class="back-btn" aria-label="${esc(c.label)}(으)로 돌아가기"><span aria-hidden="true">←</span> ${esc(c.label)}</a>
       <h1>${s.number ?? ''}${c.kind === '동아리' ? ' ' : '번 '}${esc(s.name)}</h1><div class="muted small">${s.aliases ? '별칭: ' + esc(s.aliases) + ' · ' : ''}${s.memo ? '메모: ' + esc(s.memo) : ''}</div></div>
       <div class="actions">
         ${prev ? `<a class="btn" href="${sib(prev)}">← ${esc(prev.name)}</a>` : ''}
@@ -1282,18 +1282,39 @@ async function viewDrafts(classId, areaParam) {
           <button id="x-xlsx">엑셀로 저장</button>
           <button class="primary" id="x-sheet">구글시트 지금 반영</button></span></div>
       ${isApi ? '' : '<p class="help">API 키 없이 쓸 때는 학생 이름을 눌러 한 명씩 만들거나, 왼쪽 <a href="#/prompts">프롬프트 안내</a>대로 Gemini·ChatGPT 웹에서 만드세요.</p>'}
+      <details class="lesson-ctx" ${d.context.topic || d.context.competencies || d.context.philosophy ? '' : 'open'}>
+        <summary><b>📚 수업 정보</b> <span class="muted small">초안을 만들 때 AI에게 함께 알려 줘요 (${esc(c.label)} · ${esc(area.name)})</span></summary>
+        <div class="ctx-grid">
+          <label class="field"><span>수업 내용 (종목·단원)</span><textarea id="ctx-topic" rows="2" placeholder="예: 농구 — 드리블·패스·레이업, 3대3 리그전">${esc(d.context.topic)}</textarea></label>
+          <label class="field"><span>이 수업에서 기르는 역량</span><textarea id="ctx-comp" rows="2" placeholder="예: 협력적 의사소통, 경기 전략 수립, 자기 주도적 연습">${esc(d.context.competencies)}</textarea></label>
+          <label class="field"><span>교사의 수업 철학</span><textarea id="ctx-phil" rows="2" placeholder="예: 잘하는 학생보다 끝까지 도전하는 학생을 기록하고 싶다">${esc(d.context.philosophy)}</textarea></label>
+        </div>
+        <div class="row" style="justify-content:flex-end;gap:8px"><span class="muted small" id="ctx-saved"></span><button class="primary sm" id="ctx-save" style="width:auto;flex:none;padding:8px 22px">저장</button></div>
+      </details>
       <div class="table-wrap" style="margin-top:8px"><table>
-        <thead><tr><th style="width:60px">${c.kind === '동아리' ? '학번' : '번호'}</th><th style="width:90px">이름</th><th class="right" style="width:60px">기록</th><th>초안</th><th class="right" style="width:90px">바이트</th><th style="width:70px">상태</th></tr></thead>
+        <thead><tr><th style="width:60px">${c.kind === '동아리' ? '학번' : '번호'}</th><th style="width:90px">이름</th><th class="right" style="width:60px">기록</th><th>초안</th><th class="right" style="width:110px" title="학생마다 초안 분량을 정할 수 있어요. 비우면 기본 ${limit.toLocaleString()}바이트">목표 바이트</th><th class="right" style="width:90px">바이트</th><th style="width:70px">상태</th></tr></thead>
         <tbody>${d.students.map(s => `<tr class="clickable" data-href="#/student/${s.id}${areas.length > 1 ? '/' + area.id : ''}">
           <td class="num">${s.number ?? ''}</td><td><b>${esc(s.name)}</b></td>
           <td class="num">${s.area_notes ? s.area_notes : '<span class="badge red">0</span>'}</td>
           <td class="small">${s.draft ? esc(s.draft.length > 140 ? s.draft.slice(0, 140) + '…' : s.draft) : '<span class="muted">-</span>'}</td>
-          <td class="num ${s.draft_bytes > limit ? 'counter over' : ''}">${s.draft_bytes ? s.draft_bytes.toLocaleString() : ''}</td>
+          <td class="right"><input class="target-in" type="number" min="100" max="6000" step="50" data-sid="${s.id}" value="${s.byte_target || ''}" placeholder="${limit}" aria-label="${esc(s.name)} 목표 바이트"></td>
+          <td class="num ${s.draft_bytes > (s.byte_target || limit) ? 'counter over' : ''}">${s.draft_bytes ? s.draft_bytes.toLocaleString() : ''}</td>
           <td>${s.draft_status ? `<span class="badge ${s.draft_status === '확정' ? 'green' : 'blue'}">${s.draft_status}</span>` : ''}</td></tr>`).join('')}
         </tbody></table></div>
       <p class="help">한도 ${limit.toLocaleString()}바이트 (설정에서 영역별로 바꿀 수 있음). 구글시트를 연결해 두면 자동으로 반영됩니다. 내보낼 때는 확정본이 있으면 확정본을, 없으면 최신 초안을 씁니다.</p>
     </div>`;
   bindRowLinks();
+  $('#ctx-save').onclick = async () => {
+    await api('/api/classes/context', { class_id: c.id, area: area.id, topic: $('#ctx-topic').value, competencies: $('#ctx-comp').value, philosophy: $('#ctx-phil').value });
+    $('#ctx-saved').textContent = '저장했어요 ✓ 다음 초안부터 반영돼요';
+  };
+  $$('.target-in').forEach(inp => {
+    inp.onclick = e => e.stopPropagation();
+    inp.onchange = async () => {
+      const r = await api('/api/students/target', { student_id: +inp.dataset.sid, area: area.id, bytes: inp.value });
+      toast(r.bytes ? `목표 ${(+r.bytes).toLocaleString()}바이트로 정했어요` : '기본 분량으로 되돌렸어요');
+    };
+  });
   $$('[data-area]').forEach(b => b.onclick = () => { location.hash = `#/drafts/${c.id}/${b.dataset.area}`; });
   $('#dc').onchange = e => { location.hash = '#/drafts/' + e.target.value; };
   const batch = async onlyMissing => {

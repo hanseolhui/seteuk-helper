@@ -132,3 +132,47 @@ struct Squishy: ButtonStyle {
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
+
+// MARK: - 크고 누르기 쉬운 '뒤로' 버튼 (기본 버튼의 약 3배 크기)
+struct BigBackButton: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+    var title: String
+    func body(content: Content) -> some View {
+        content
+            .navigationBarBackButtonHidden(true)
+            // 위쪽 막대 안에 넣으면 iOS가 작은 동그라미로 줄여 버려서, 화면 맨 위에 따로 크게 둔다
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack {
+                    Button { dismiss() } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left").font(.system(size: 22, weight: .heavy))
+                            Text(title).font(Theme.font(20, .bold)).lineLimit(1)
+                        }
+                        .padding(.leading, 16).padding(.trailing, 22)
+                        .frame(minHeight: 54)
+                        .foregroundStyle(Theme.blue)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .background(Theme.blue.opacity(0.14), in: Capsule())
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(Squishy())
+                    .accessibilityLabel("\(title)(으)로 돌아가기")
+                    Spacer()
+                }
+                .padding(.horizontal, 16).padding(.vertical, 6)
+            }
+    }
+}
+
+extension View {
+    func bigBackButton(_ title: String = "뒤로") -> some View { modifier(BigBackButton(title: title)) }
+}
+
+/// 기본 뒤로 버튼을 숨겨도 화면 왼쪽을 밀어서 돌아가기는 그대로 되게
+extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
+    override open func viewDidLoad() {
+        super.viewDidLoad()
+        interactivePopGestureRecognizer?.delegate = self
+    }
+    public func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool { viewControllers.count > 1 }
+}

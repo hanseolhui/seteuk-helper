@@ -156,6 +156,18 @@ CREATE TABLE IF NOT EXISTS jobs (
     message TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now','localtime')), finished_at TEXT
 );
+CREATE TABLE IF NOT EXISTS class_context (
+    class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+    area TEXT NOT NULL DEFAULT 'subject',
+    topic TEXT DEFAULT '', competencies TEXT DEFAULT '', philosophy TEXT DEFAULT '',
+    PRIMARY KEY (class_id, area)
+);
+CREATE TABLE IF NOT EXISTS student_targets (
+    student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    area TEXT NOT NULL DEFAULT 'subject',
+    bytes INTEGER,
+    PRIMARY KEY (student_id, area)
+);
 CREATE TABLE IF NOT EXISTS imported (
     source TEXT, ext_id TEXT, sig TEXT DEFAULT '', body TEXT DEFAULT '', recording_id INTEGER,
     created_at TEXT DEFAULT (datetime('now','localtime')),

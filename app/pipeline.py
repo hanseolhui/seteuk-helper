@@ -37,6 +37,32 @@ def _students(conn, class_id):
     return db.rows(conn, "SELECT * FROM students WHERE class_id=? ORDER BY number, name", (class_id,))
 
 
+def _term_students(conn):
+    """이번 학기 모든 학급 학생 (없으면 전체) — 학급이 지정되지 않은 녹음, 다른 반 학생이 섞인 녹음용.
+    학생마다 class_label 을 붙여 AI 명단에 학급도 보이게 한다."""
+    today = datetime.date.today()
+    y, m = today.year, today.month
+    year, sem = (y - 1, 2) if m <= 2 else (y, 1 if m <= 8 else 2)
+    sql = ("SELECT s.*, c.grade, c.class_no, c.subject, c.kind AS ckind, c.label AS clabel, c.year, c.semester "
+           "FROM students s JOIN classes c ON c.id=s.class_id %s ORDER BY c.grade, c.class_no, s.number, s.name")
+    rows = db.rows(conn, sql % "WHERE c.year=? AND c.semester=?", (year, sem))
+    if not rows:
+        rows = db.rows(conn, sql % "")
+    for s in rows:
+        s["class_label"] = db.class_label({"grade": s["grade"], "class_no": s["class_no"], "subject": s["subject"],
+                                           "kind": s["ckind"], "label": s["clabel"], "year": s["year"], "semester": s["semester"]})
+    return rows
+
+
+def _roster_for(conn, r):
+    """AI 분리에 쓸 명단: 학급이 정해졌으면 그 반, 아니면 이번 학기 전체(학급 표시)."""
+    if r.get("class_id"):
+        own = _students(conn, r["class_id"])
+        if own:
+            return own
+    return _term_students(conn)
+
+
 def _recording(conn, rid):
     r = db.row(conn, "SELECT * FROM recordings WHERE id=?", (rid,))
     if not r:
@@ -66,7 +92,9 @@ def build_prompt(op, params):
             if not (r.get("transcript") or "").strip():
                 raise ValueError("전사문이 없습니다. 먼저 전사하거나 붙여넣으세요.")
             c = _class_info(conn, r["class_id"])
-            return {"prompt": prompts.segment(r["kind"], c["label"], _students(conn, r["class_id"]),
+            roster = _roster_for(conn, r)
+            label = c["label"] if r["class_id"] and c["label"] else "미지정 — 아래는 이번 학기 모든 학급 명단"
+            return {"prompt": prompts.segment(r["kind"], label, roster,
                                               r["transcript"], (r["recorded_at"] or "")[:10]),
                     "system": prompts.SEGMENT_SYSTEM, "json": True}
         if op == "draft":
@@ -81,11 +109,20 @@ def build_prompt(op, params):
                      if db.note_area(n, kind) == area]
             if not notes:
                 raise ValueError("%s 학생의 '%s' 관찰기록이 없습니다." % (s["name"], db.area_name(area)))
-            return {"prompt": prompts.draft(s, c, notes, settings, params.get("extra", ""), area),
+            ctx = db.row(conn, "SELECT topic, competencies, philosophy FROM class_context WHERE class_id=? AND area=?",
+                         (s["class_id"], area)) or {}
+            t = db.row(conn, "SELECT bytes FROM student_targets WHERE student_id=? AND area=?", (s["id"], area))
+            return {"prompt": prompts.draft(s, c, notes, settings, params.get("extra", ""), area,
+                                            context=ctx, target=(t or {}).get("bytes")),
                     "system": prompts.DRAFT_SYSTEM}
         if op == "shorten":
             text = params.get("text", "")
             limit = db.area_limit(params.get("area") or "subject", settings)
+            if params.get("student_id"):
+                t = db.row(conn, "SELECT bytes FROM student_targets WHERE student_id=? AND area=?",
+                           (params["student_id"], params.get("area") or "subject"))
+                if t and t["bytes"]:
+                    limit = t["bytes"]
             return {"prompt": prompts.shorten(text, limit, db.neis_bytes(text)),
                     "system": prompts.DRAFT_SYSTEM}
         raise ValueError("알 수 없는 작업: %s" % op)
@@ -130,16 +167,26 @@ def apply_segment(rid, text):
             if class_id:
                 conn.execute("UPDATE recordings SET class_id=? WHERE id=?", (class_id, rid))
         students = _students(conn, class_id)
+        everyone = _term_students(conn)   # 반이 없거나 다른 반 학생일 때 찾아볼 명단
         date = (r["recorded_at"] or "")[:10] or datetime.date.today().isoformat()
         # 재분리 시 이전 결과 교체
         conn.execute("DELETE FROM notes WHERE recording_id=?", (rid,))
         conn.execute("DELETE FROM unmatched WHERE recording_id=?", (rid,))
         matched, unmatched = 0, 0
+        found_classes = set()
         for it in data.get("items", []) or []:
             content = (it.get("observation") or it.get("content") or "").strip()
             if not content:
                 continue
-            st = match_student(students, it.get("number"), it.get("name"))
+            st = match_student(students, it.get("number"), it.get("name")) if students else None
+            if not st:
+                # 학급 미지정이거나 명단에 없는 경우: 이번 학기 전체 명단에서 이름으로 (번호는 반마다 겹치므로 쓰지 않음)
+                cands = everyone
+                if students:
+                    cands = [s for s in everyone if s["class_id"] != class_id]
+                st = match_student(cands, None, it.get("name"))
+                if st and not class_id:
+                    found_classes.add(st["class_id"])
             if st:
                 conn.execute("INSERT INTO notes(student_id, recording_id, date, kind, category, content, evidence) "
                              "VALUES (?,?,?,?,?,?,?)",
@@ -161,6 +208,8 @@ def apply_segment(rid, text):
                               it.get("category", "")))
                 unmatched += 1
         status = "확인필요" if unmatched else "완료"
+        if not class_id and len(found_classes) == 1:   # 모두 한 반 학생이면 녹음에 그 반을 지정
+            conn.execute("UPDATE recordings SET class_id=? WHERE id=?", (found_classes.pop(), rid))
         conn.execute("UPDATE recordings SET status=?, error='' WHERE id=?", (status, rid))
         conn.commit()
         return {"ok": True, "matched": matched, "unmatched": unmatched}
@@ -201,6 +250,10 @@ def _aliases(s):
 
 def match_student(students, number, name):
     name = re.sub(r"\s+", "", str(name or ""))
+    # AI가 '3번 김민수', '김민수 학생', '2-3 김민수', '김민수(3번)'처럼 돌려줘도 이름만 남김
+    name = re.sub(r"^\d+\s*-\s*\d+", "", name)
+    name = re.sub(r"^\d+번?", "", name)
+    name = re.sub(r"\(.*?\)|학생$|군$|양$", "", name)
     try:
         number = int(str(number).replace("번", "").strip()) if number not in (None, "") else None
     except ValueError:
@@ -361,9 +414,9 @@ def rule_segment(rid):
             if cid:
                 conn.execute("UPDATE recordings SET class_id=? WHERE id=?", (cid, rid))
                 r["class_id"] = cid
-        students = _students(conn, r["class_id"])
+        students = _students(conn, r["class_id"]) or _term_students(conn)
         if not students:
-            raise ValueError("학급과 학생 명단이 있어야 분리할 수 있습니다.")
+            raise ValueError("학생 명단이 있어야 분리할 수 있습니다. 학급을 만들고 명단을 넣어 주세요.")
         text = re.sub(r"\[\d{1,2}:\d{2}(?::\d{2})?\]", " ", r["transcript"] or "")
         text = re.sub(r"(교사|선생님|학생)\s*:", " ", text)
         # 학생별 검색어 (긴 것 우선)

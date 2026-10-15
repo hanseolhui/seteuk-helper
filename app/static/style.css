@@ -472,3 +472,21 @@ audio { width: 100%; margin: 8px 0; }
   .donut .ring, .gbar i, .areabar i, .minibar i, .spark-line { transition: none !important; }
   .cp-party { animation: none; }
 }
+
+/* 초안: 수업 정보 · 목표 바이트 */
+.lesson-ctx { margin: 10px 0 4px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--panel-2); }
+.lesson-ctx summary { cursor: pointer; list-style: none; }
+.lesson-ctx summary::-webkit-details-marker { display: none; }
+.lesson-ctx summary::before { content: "▸ "; color: var(--muted); }
+.lesson-ctx[open] summary::before { content: "▾ "; }
+.ctx-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 10px 0 6px; }
+.ctx-grid textarea { resize: vertical; min-height: 54px; }
+.target-in { width: 84px; text-align: right; padding: 6px 8px; border-radius: 10px; }
+
+/* 뒤로 가기: 크게, 누르기 쉽게 */
+.back-btn { display: inline-flex; align-items: center; gap: 10px; min-height: 52px; padding: 10px 24px 10px 18px; margin-bottom: 12px;
+  font-size: 19px; font-weight: 800; color: var(--accent); background: var(--accent-soft); border-radius: 99px; text-decoration: none;
+  transition: transform .12s var(--ease), box-shadow .12s; }
+.back-btn span { font-size: 26px; line-height: 1; }
+.back-btn:hover { box-shadow: var(--shadow); transform: translateX(-2px); }
+.back-btn:active { transform: scale(.97); }

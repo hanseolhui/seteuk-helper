@@ -341,6 +341,40 @@ def classes_delete(h, q, b):
     return {"ok": True, "trash_id": tid}
 
 
+@route("POST", "/api/classes/context")
+def class_context_save(h, q, b):
+    """초안에 함께 쓰는 수업 정보: 종목·단원 / 배우는 역량 / 교사의 철학 (학급·영역별)"""
+    cid = _int(b.get("class_id"))
+    if not cid:
+        raise ApiError("학급을 골라 주세요.")
+    area = b.get("area") or "subject"
+    vals = tuple((b.get(k) or "").strip()[:2000] for k in ("topic", "competencies", "philosophy"))
+    conn = db.connect()
+    conn.execute("INSERT OR REPLACE INTO class_context(class_id, area, topic, competencies, philosophy) VALUES (?,?,?,?,?)",
+                 (cid, area) + vals)
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@route("POST", "/api/students/target")
+def student_target_save(h, q, b):
+    """학생별 초안 분량(NEIS 바이트). 비우면 영역 기본 한도를 씀"""
+    sid = _int(b.get("student_id"))
+    if not sid:
+        raise ApiError("학생을 골라 주세요.")
+    area = b.get("area") or "subject"
+    n = _int(b.get("bytes"))
+    conn = db.connect()
+    if n and n > 0:
+        conn.execute("INSERT OR REPLACE INTO student_targets(student_id, area, bytes) VALUES (?,?,?)", (sid, area, min(n, 6000)))
+    else:
+        conn.execute("DELETE FROM student_targets WHERE student_id=? AND area=?", (sid, area))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "bytes": n if n and n > 0 else None}
+
+
 @route("GET", r"/api/classes/(\d+)")
 def class_detail(h, q, b, cid):
     conn = db.connect()
@@ -365,7 +399,11 @@ def class_detail(h, q, b, cid):
             st["draft_status"] = d["status"] if d else None
             st["draft_bytes"] = d["bytes"] if d else None
             st["draft"] = d["content"] if d else None
-        return {"class": c, "students": students, "areas": areas, "area": area,
+            t = db.row(conn, "SELECT bytes FROM student_targets WHERE student_id=? AND area=?", (st["id"], area))
+            st["byte_target"] = t["bytes"] if t else None
+        ctx = db.row(conn, "SELECT topic, competencies, philosophy FROM class_context WHERE class_id=? AND area=?",
+                     (int(cid), area)) or {"topic": "", "competencies": "", "philosophy": ""}
+        return {"class": c, "students": students, "areas": areas, "area": area, "context": ctx,
                 "byte_limit": db.area_limit(area, settings)}
     finally:
         conn.close()
@@ -466,7 +504,11 @@ def student_detail(h, q, b, sid):
                            (s["class_id"],))
         kind = c.get("kind") or "교과"
         settings = db.get_settings(conn)
-        areas = [dict(a, limit=db.area_limit(a["id"], settings)) for a in db.areas_for_kind(kind)]
+        targets = {t["area"]: t["bytes"] for t in db.rows(conn, "SELECT area, bytes FROM student_targets WHERE student_id=?", (int(sid),))}
+        # 학생별 목표 분량이 있으면 그 영역 한도로 씀
+        areas = [dict(a, limit=targets.get(a["id"]) or db.area_limit(a["id"], settings),
+                      default_limit=db.area_limit(a["id"], settings), target=targets.get(a["id"]))
+                 for a in db.areas_for_kind(kind)]
         for n in notes:
             n["area_eff"] = db.note_area(n, kind)
         return {"student": s, "class": c, "notes": notes, "drafts": drafts, "siblings": siblings,

@@ -246,6 +246,7 @@ struct EntryDetail: View {
         }
         .softBackground()
         .navigationTitle(current.isAudio ? "녹음" : "메모")
+        .bigBackButton("기록함")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { kind = current.kind; memo = current.memo; text = current.text; transcript = current.transcript }
         .onChange(of: current.transcript) { t in if transcript.isEmpty { transcript = t } }

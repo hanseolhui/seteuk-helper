@@ -17,6 +17,8 @@ def roster_text(students):
     lines = []
     for s in students:
         line = "%s번 %s" % (s.get("number") if s.get("number") is not None else "-", s["name"])
+        if s.get("class_label"):
+            line = "[%s] %s" % (s["class_label"], line)
         if s.get("aliases"):
             line += " (다르게 들릴 수 있는 이름: %s)" % s["aliases"]
         lines.append(line)
@@ -98,9 +100,11 @@ AREA_GUIDE = {
 }
 
 
-def draft(student, class_info, notes, settings, extra="", area="subject"):
+def draft(student, class_info, notes, settings, extra="", area="subject", context=None, target=None):
     import db
     limit = db.area_limit(area, settings)
+    if target:   # 학생별로 정한 분량이 있으면 그걸 씀
+        limit = int(target)
     approx_chars = int(limit / 3 * 0.95)
     subject = (class_info.get("subject") or settings.get("teacher_subject") or "해당 교과")
     title_t, guide_t = AREA_GUIDE.get(area, AREA_GUIDE["subject"])
@@ -130,6 +134,17 @@ def draft(student, class_info, notes, settings, extra="", area="subject"):
 - 분량: NEIS 기준 %d바이트 이내(한글 약 %d자 이내), 한 문단. 줄바꿈 없이.
 - 머리말·설명·따옴표 없이 본문만 출력.
 """ % (grade, title, guide_t, limit, approx_chars)
+    ctx = context or {}
+    lesson = []
+    if (ctx.get("topic") or "").strip():
+        lesson.append("- 수업 내용(종목·단원): %s" % ctx["topic"].strip())
+    if (ctx.get("competencies") or "").strip():
+        lesson.append("- 이 수업에서 기르는 역량: %s" % ctx["competencies"].strip())
+    if (ctx.get("philosophy") or "").strip():
+        lesson.append("- 교사의 수업 철학: %s" % ctx["philosophy"].strip())
+    if lesson:
+        out += ("\n[수업 정보 — 관찰기록을 이 수업 맥락과 역량에 맞춰 해석하는 데만 쓰고, "
+                "기록에 없는 활동을 만들어 내지 말 것]\n%s\n" % "\n".join(lesson))
     if guidance:
         out += "\n[교사의 추가 지침]\n%s\n" % guidance
     if style:
